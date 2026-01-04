@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
 import Footer from './components/Footer';
@@ -36,11 +36,9 @@ function App() {
   const [isEditProfileModalOpen, setIsEditProfileModalOpen] = useState(false);
   const [pendingPurchase, setPendingPurchase] = useState<{amount: number, cost: number} | null>(null);
   const [exploreSearchTerm, setExploreSearchTerm] = useState('');
-  const [targetMessageUserId, setTargetMessageUserId] = useState<string | null>(null);
-  
   const [language, setLanguage] = useState<Language>('en');
 
-  // State synchronized with "Backend"
+  // Unified System State
   const [boxes, setBoxes] = useState<Box[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [user, setUser] = useState<User | null>(null);
@@ -52,13 +50,12 @@ function App() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [tutorSessions, setTutorSessions] = useState<TutorSession[]>([]);
 
-  // Initial Data Load
   useEffect(() => {
     storageService.initialize();
     refreshData();
-    const savedUser = storageService.getCurrentUser();
-    if (savedUser) {
-       handleLogin(savedUser.handle);
+    const saved = storageService.getCurrentUser();
+    if (saved) {
+      handleLogin(saved.handle);
     }
   }, []);
 
@@ -71,18 +68,19 @@ function App() {
     setEvents(storageService.getEvents());
     setReminders(storageService.getReminders());
     setGroups(storageService.getGroups());
-    const currentUser = storageService.getCurrentUser();
-    if (currentUser) setUser(currentUser);
+    setTutorSessions(storageService.getTutorSessions());
+    const current = storageService.getCurrentUser();
+    setUser(current);
   };
 
-  const handleLogin = async (handle: string) => {
+  const handleLogin = async (handle: string): Promise<void> => {
     try {
-      const loggedInUser = await api.auth.login(handle);
-      setUser(loggedInUser);
+      const loggedIn = await api.auth.login(handle);
+      setUser(loggedIn);
       refreshData();
       setCurrentView(ViewState.DASHBOARD);
     } catch (err) {
-      alert("Login failed: " + (err as Error).message);
+      throw err;
     }
   };
 
@@ -98,37 +96,86 @@ function App() {
   };
 
   const handleLogout = () => {
-    setUser(null);
     storageService.clearSession();
+    setUser(null);
     setCurrentView(ViewState.LOGIN);
-    setIsMobileMenuOpen(false);
   };
 
   const handleViewChange = (view: ViewState) => {
     if (view === ViewState.CREATE) { setIsCreatorModalOpen(true); return; }
     setCurrentView(view);
-    setSelectedBoxId(null);
     setViewingProfileId(null);
-    setTargetMessageUserId(null); 
-    window.scrollTo(0, 0);
     setIsMobileMenuOpen(false);
   };
 
-  const handleBoxSelect = (boxId: string) => { 
-    setSelectedBoxId(boxId); 
-    setCurrentView(ViewState.BOX_DETAIL); 
-    window.scrollTo(0, 0); 
+  const handleAddComment = async (lessonId: string, text: string) => {
+    if (!user) return;
+    await api.content.addComment(user.id, lessonId, text);
+    refreshData();
   };
 
-  const handleCreateBox = async (newBox: Box) => {
-    await api.content.createBox(newBox);
-    if (user) {
-      const updatedUser = { ...user, subscribedBoxIds: [...(user.subscribedBoxIds || []), newBox.id] };
-      storageService.saveCurrentUser(updatedUser);
-      storageService.saveUsers(storageService.getUsers().map(u => u.id === user.id ? updatedUser : u));
-    }
+  const handleToggleFavorite = async (boxId: string) => {
+    if (!user) return;
+    await api.social.toggleFavorite(user.id, boxId);
     refreshData();
-    setCurrentView(ViewState.MY_BOXES);
+  };
+
+  const handleToggleFollow = async (targetId: string) => {
+    if (!user) return;
+    await api.social.toggleFollow(user.id, targetId);
+    refreshData();
+  };
+
+  const handleSaveLesson = async (lessonId: string) => {
+      if (!user) return;
+      await api.social.toggleSaveLesson(user.id, lessonId);
+      refreshData();
+  };
+
+  const handleBookTutor = async (session: TutorSession) => {
+      if (!user) return;
+      try {
+          await api.social.bookTutorSession(session);
+          refreshData();
+      } catch (err) {
+          alert("Booking failed: " + (err as Error).message);
+      }
+  };
+
+  const handleSubscribe = async (boxId: string) => {
+    if (!user) return;
+    const box = boxes.find(b => b.id === boxId);
+    if (!box) return;
+
+    const price = box.price || 0;
+    if (user.points < price) {
+      alert("Insufficient points! Visit the wallet to top up.");
+      return;
+    }
+
+    if (price > 0 && !window.confirm(`Unlock for ${price} points?`)) return;
+
+    const updatedUser = { 
+      ...user, 
+      points: user.points - price, 
+      subscribedBoxIds: [...(user.subscribedBoxIds || []), boxId] 
+    };
+    
+    if (price > 0) {
+      const tx: Transaction = {
+        id: `t-sub-${Date.now()}`,
+        type: 'debit',
+        amount: price,
+        description: `Subscribed to: ${box.title}`,
+        timestamp: new Date().toLocaleDateString()
+      };
+      storageService.saveTransactions([tx, ...storageService.getTransactions()]);
+    }
+
+    storageService.saveCurrentUser(updatedUser);
+    storageService.saveUsers(storageService.getUsers().map(u => u.id === user.id ? updatedUser : u));
+    await api.content.updateBox({ ...box, subscribers: box.subscribers + 1 });
+    refreshData();
   };
 
   const handleAddLesson = async (newLesson: Lesson) => {
@@ -143,85 +190,123 @@ function App() {
     refreshData();
   };
 
-  const handleFollowToggle = async (targetUserId: string) => {
-    if (!user) return;
-    await api.social.toggleFollow(user.id, targetUserId);
-    refreshData();
-  };
-
-  const handleBuyPoints = (amount: number, cost: number) => {
-    setPendingPurchase({ amount, cost });
-  };
-
-  const handleConfirmPayment = async () => {
-    if (!user || !pendingPurchase) return;
-    await api.wallet.purchasePoints(user.id, pendingPurchase.amount);
-    setPendingPurchase(null);
-    refreshData();
-  };
-
-  const handleSubscribe = async (boxId: string) => {
-    if (!user) return;
-    const box = boxes.find(b => b.id === boxId);
-    if (!box) return;
-    
-    const price = (box.accessLevel === 'premium' && box.price) ? box.price : 0;
-    if (user.points < price) {
-      alert("Not enough points!");
-      return;
-    }
-
-    if (price > 0 && !window.confirm(`Unlock for ${price} pts?`)) return;
-
-    const updatedUser = { ...user, points: user.points - price, subscribedBoxIds: [...(user.subscribedBoxIds || []), boxId] };
+  const handleSaveProfile = async (updatedUser: User) => {
     storageService.saveCurrentUser(updatedUser);
-    storageService.saveUsers(storageService.getUsers().map(u => u.id === user.id ? updatedUser : u));
-    
-    if (price > 0) {
-      const tx: Transaction = {
-        id: `t-sub-${Date.now()}`,
-        type: 'debit',
-        amount: price,
-        description: `Unlocked box: ${box.title}`,
-        timestamp: new Date().toLocaleDateString()
-      };
-      storageService.saveTransactions([tx, ...storageService.getTransactions()]);
-    }
-
-    await api.content.updateBox({ ...box, subscribers: box.subscribers + 1 });
+    storageService.saveUsers(storageService.getUsers().map(u => u.id === updatedUser.id ? updatedUser : u));
     refreshData();
   };
 
-  const subscribedBoxes = useMemo(() => 
-    boxes.filter(b => user?.subscribedBoxIds?.includes(b.id)), 
-    [boxes, user]
-  );
+  const subscribedBoxes = useMemo(() => boxes.filter(b => user?.subscribedBoxIds?.includes(b.id)), [boxes, user]);
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-900">
-       {user && ( <Sidebar user={user} currentView={currentView} onChangeView={handleViewChange} isMobileOpen={isMobileMenuOpen} onCloseMobile={() => setIsMobileMenuOpen(false)} onLogout={handleLogout} language={language} /> )}
-       {user && currentView !== ViewState.LOGIN && currentView !== ViewState.SIGNUP && currentView !== ViewState.FORGOT_PASSWORD && ( <Header user={user} currentView={currentView} onChangeView={handleViewChange} onToggleMobileMenu={() => setIsMobileMenuOpen(!isMobileMenuOpen)} onLogout={handleLogout} onSearch={(t) => { setExploreSearchTerm(t); setCurrentView(ViewState.EXPLORE); }} notificationCount={notifications.filter(n=>!n.isRead).length} messageCount={conversations.reduce((a,c)=>a+c.unreadCount,0)} language={language} /> )}
+       {user && <Sidebar user={user} currentView={currentView} onChangeView={handleViewChange} isMobileOpen={isMobileMenuOpen} onCloseMobile={() => setIsMobileMenuOpen(false)} onLogout={handleLogout} language={language} />}
+       {user && currentView !== ViewState.LOGIN && currentView !== ViewState.SIGNUP && (
+         <Header 
+          user={user} 
+          currentView={currentView} 
+          onChangeView={handleViewChange} 
+          onToggleMobileMenu={() => setIsMobileMenuOpen(!isMobileMenuOpen)} 
+          onLogout={handleLogout} 
+          onSearch={(t) => { setExploreSearchTerm(t); setCurrentView(ViewState.EXPLORE); }} 
+          notificationCount={notifications.filter(n=>!n.isRead).length} 
+          messageCount={conversations.reduce((a,c)=>a+c.unreadCount,0)} 
+          language={language} 
+         />
+       )}
+       
        <main className="flex-1">
           {currentView === ViewState.LOGIN && <Login onLogin={handleLogin} onNavigate={handleViewChange} />}
           {currentView === ViewState.SIGNUP && <Signup onSignup={handleSignup} onNavigate={handleViewChange} />}
           {currentView === ViewState.FORGOT_PASSWORD && <ForgotPassword onNavigate={handleViewChange} />}
+          
           {user && (
-              <>
-              {currentView === ViewState.DASHBOARD && <Dashboard user={user} subscribedBoxes={subscribedBoxes} allBoxes={boxes} allUsers={users} myTransactions={transactions} onAddComment={()=>{}} onHashtagClick={handleViewChange as any} onSubscribe={handleSubscribe} onViewBox={handleBoxSelect} onCreateBox={() => setIsCreatorModalOpen(true)} onEditProfile={() => setIsEditProfileModalOpen(true)} onComplete={handleCompleteLesson} onViewProfile={setViewingProfileId as any} onExplore={() => handleViewChange(ViewState.EXPLORE)} groups={groups} tutorSessions={tutorSessions} />}
-              {currentView === ViewState.MY_BOXES && <MyBoxes createdBoxes={boxes.filter(b => b.creatorId === user.id)} subscribedBoxes={subscribedBoxes} sharedWithMeBoxes={[]} allBoxes={boxes} allUsers={users} onTogglePrivacy={()=>{}} onUpdatePrice={()=>{}} onViewBox={handleBoxSelect} onCreateBox={() => setIsCreatorModalOpen(true)} onUpdateBox={api.content.updateBox} onDeleteBox={api.content.deleteBox} onPromote={()=>{}} onShare={()=>{}} userPoints={user.points} currentUser={user} favoriteBoxIds={user.favoriteBoxIds} onToggleFavorite={()=>{}} onNavigateToExplore={() => handleViewChange(ViewState.EXPLORE)} groups={groups} />}
-              {currentView === ViewState.EXPLORE && <Explore allBoxes={boxes} subscribedIds={user.subscribedBoxIds || []} onSubscribe={handleSubscribe} onViewBox={handleBoxSelect} initialSearchTerm={exploreSearchTerm} allUsers={users} currentUser={user} onShare={()=>{}} onToggleFollow={handleFollowToggle} onViewProfile={setViewingProfileId as any} groups={groups} />}
-              {currentView === ViewState.LEADERBOARD && <Leaderboard users={users} onViewProfile={setViewingProfileId as any} onMessage={()=>{}} />}
-              {currentView === ViewState.WALLET && <Wallet user={user} transactions={transactions} onBuyPoints={handleBuyPoints} />}
-              {currentView === ViewState.BOX_DETAIL && selectedBoxId && <BoxDetail box={boxes.find(b => b.id === selectedBoxId)!} onBack={() => setCurrentView(ViewState.DASHBOARD)} isOwner={boxes.find(b => b.id === selectedBoxId)?.creatorId === user.id} onAddLesson={() => setIsAddLessonModalOpen(true)} onAddComment={()=>{}} onComplete={handleCompleteLesson} allUsers={users} currentUser={user} subscribed={user.subscribedBoxIds?.includes(selectedBoxId)} onSubscribe={handleSubscribe} groups={groups} />}
-              {currentView === ViewState.PROFILE && <UserProfile user={user} currentUser={user} allUsers={users} onBack={() => setCurrentView(ViewState.DASHBOARD)} onToggleFollow={handleFollowToggle} userBoxes={boxes.filter(b => b.creatorId === user.id)} subscribedBoxes={subscribedBoxes} onViewBox={handleBoxSelect} onSubscribe={handleSubscribe} onShare={()=>{}} favoriteBoxIds={user.favoriteBoxIds || []} onToggleFavorite={()=>{}} groups={groups} tutorSessions={tutorSessions} />}
-              </>
+            <>
+              {currentView === ViewState.DASHBOARD && (
+                <Dashboard 
+                  user={user} subscribedBoxes={subscribedBoxes} allBoxes={boxes} allUsers={users} myTransactions={transactions}
+                  onAddComment={handleAddComment} onHashtagClick={(tag) => { setExploreSearchTerm(tag); setCurrentView(ViewState.EXPLORE); }}
+                  onSubscribe={handleSubscribe} onViewBox={(id) => { setSelectedBoxId(id); setCurrentView(ViewState.BOX_DETAIL); }}
+                  onCreateBox={() => setIsCreatorModalOpen(true)} onEditProfile={() => setIsEditProfileModalOpen(true)}
+                  onComplete={handleCompleteLesson} onViewProfile={(id) => { setViewingProfileId(id); setCurrentView(ViewState.USER_PROFILE); }}
+                  onExplore={() => setCurrentView(ViewState.EXPLORE)} groups={groups} tutorSessions={tutorSessions}
+                  onSaveLesson={handleSaveLesson}
+                />
+              )}
+              {currentView === ViewState.EXPLORE && (
+                <Explore 
+                  allBoxes={boxes} subscribedIds={user.subscribedBoxIds || []} onSubscribe={handleSubscribe}
+                  onViewBox={(id) => { setSelectedBoxId(id); setCurrentView(ViewState.BOX_DETAIL); }}
+                  initialSearchTerm={exploreSearchTerm} allUsers={users} currentUser={user} onShare={()=>{}}
+                  onToggleFollow={handleToggleFollow} onViewProfile={(id) => { setViewingProfileId(id); setCurrentView(ViewState.USER_PROFILE); }}
+                  groups={groups} favoriteBoxIds={user.favoriteBoxIds} onToggleFavorite={handleToggleFavorite}
+                  onBookTutor={handleBookTutor} tutorSessions={tutorSessions}
+                />
+              )}
+              {currentView === ViewState.MY_BOXES && (
+                <MyBoxes 
+                  createdBoxes={boxes.filter(b => b.creatorId === user.id)} subscribedBoxes={subscribedBoxes} sharedWithMeBoxes={[]}
+                  allBoxes={boxes} allUsers={users} userPoints={user.points} currentUser={user} favoriteBoxIds={user.favoriteBoxIds}
+                  onTogglePrivacy={()=>{}} onUpdatePrice={()=>{}} onViewBox={(id) => { setSelectedBoxId(id); setCurrentView(ViewState.BOX_DETAIL); }}
+                  onCreateBox={() => setIsCreatorModalOpen(true)} onUpdateBox={api.content.updateBox} onDeleteBox={api.content.deleteBox}
+                  onPromote={()=>{}} onShare={()=>{}} onToggleFavorite={handleToggleFavorite} onNavigateToExplore={() => setCurrentView(ViewState.EXPLORE)}
+                  onSaveLesson={handleSaveLesson}
+                />
+              )}
+              {currentView === ViewState.NETWORK && (
+                <Network 
+                    currentUser={user} allUsers={users} onToggleFollow={handleToggleFollow} onMessage={(id) => setCurrentView(ViewState.MESSAGING)}
+                    events={events} onJoinEvent={async (id) => { await api.social.joinEvent(user.id, id); refreshData(); }}
+                    onCreateEvent={async (e) => { await api.social.createEvent(e); refreshData(); }}
+                    onUpdateEvent={async (e) => { await api.social.updateEvent(e); refreshData(); }}
+                    groups={groups} onCreateGroup={async (g) => { await api.social.createGroup(g); refreshData(); }}
+                    onUpdateGroup={async (g) => { await api.social.updateGroup(g); refreshData(); }}
+                    onDeleteGroup={async (id) => { await api.social.deleteGroup(id); refreshData(); }}
+                />
+              )}
+              {currentView === ViewState.BOX_DETAIL && selectedBoxId && (
+                <BoxDetail 
+                  box={boxes.find(b => b.id === selectedBoxId)!} onBack={() => setCurrentView(ViewState.DASHBOARD)}
+                  isOwner={boxes.find(b => b.id === selectedBoxId)?.creatorId === user.id} allUsers={users} currentUser={user}
+                  subscribed={user.subscribedBoxIds?.includes(selectedBoxId)} onSubscribe={handleSubscribe}
+                  onAddLesson={() => setIsAddLessonModalOpen(true)} onAddComment={handleAddComment} onComplete={handleCompleteLesson}
+                  onSaveLesson={handleSaveLesson}
+                />
+              )}
+              {currentView === ViewState.PROFILE && (
+                <UserProfile 
+                  user={user} currentUser={user} allUsers={users} onBack={() => setCurrentView(ViewState.DASHBOARD)}
+                  onToggleFollow={handleToggleFollow} userBoxes={boxes.filter(b => b.creatorId === user.id)} subscribedBoxes={subscribedBoxes}
+                  onViewBox={(id) => { setSelectedBoxId(id); setCurrentView(ViewState.BOX_DETAIL); }} onSubscribe={handleSubscribe}
+                  onShare={()=>{}} favoriteBoxIds={user.favoriteBoxIds || []} onToggleFavorite={handleToggleFavorite} tutorSessions={tutorSessions}
+                  onSaveLesson={handleSaveLesson}
+                />
+              )}
+              {currentView === ViewState.USER_PROFILE && viewingProfileId && (
+                <UserProfile 
+                  user={users.find(u => u.id === viewingProfileId)!} currentUser={user} allUsers={users} onBack={() => setCurrentView(ViewState.DASHBOARD)}
+                  onToggleFollow={handleToggleFollow} userBoxes={boxes.filter(b => b.creatorId === viewingProfileId)} subscribedBoxes={boxes.filter(b => users.find(u=>u.id===viewingProfileId)?.subscribedBoxIds?.includes(b.id))}
+                  onViewBox={(id) => { setSelectedBoxId(id); setCurrentView(ViewState.BOX_DETAIL); }} onSubscribe={handleSubscribe}
+                  onShare={()=>{}} favoriteBoxIds={user.favoriteBoxIds || []} onToggleFavorite={handleToggleFavorite} tutorSessions={tutorSessions}
+                  onSaveLesson={handleSaveLesson}
+                />
+              )}
+              {currentView === ViewState.WALLET && <Wallet user={user} transactions={transactions} onBuyPoints={(a, c) => setPendingPurchase({amount: a, cost: c})} />}
+              {currentView === ViewState.NOTIFICATIONS && <Notifications notifications={notifications} onMarkAllRead={() => { storageService.saveNotifications(notifications.map(n => ({...n, isRead: true}))); refreshData(); }} />}
+              {currentView === ViewState.LEADERBOARD && <Leaderboard users={users} onViewProfile={(id) => { setViewingProfileId(id); setCurrentView(ViewState.USER_PROFILE); }} onMessage={()=>{}} />}
+              {currentView === ViewState.ANALYTICS && <Analytics user={user} allBoxes={boxes.filter(b=>b.creatorId===user.id)} subscribedBoxes={subscribedBoxes} onViewBox={(id) => { setSelectedBoxId(id); setCurrentView(ViewState.BOX_DETAIL); }} tutorSessions={tutorSessions} myTransactions={transactions} />}
+              {currentView === ViewState.MESSAGING && <Messaging currentUser={user} conversations={conversations} users={users} onSendMessage={(pid, txt) => { /* Mock logic */ }} groups={groups} />}
+              {currentView === ViewState.CALENDAR && <Calendar currentUser={user} events={events} reminders={reminders} onAddReminder={(r) => { storageService.saveReminders([...reminders, r]); refreshData(); }} onToggleReminder={(id) => { storageService.saveReminders(reminders.map(r => r.id === id ? {...r, isCompleted: !r.isCompleted} : r)); refreshData(); }} tutorSessions={tutorSessions} />}
+            </>
           )}
        </main>
+
        {user && <Footer language={language} onLanguageChange={setLanguage} />}
-       <AICreatorModal isOpen={isCreatorModalOpen} onClose={() => setIsCreatorModalOpen(false)} onSave={handleCreateBox} currentUser={user} />
+
+       <AICreatorModal isOpen={isCreatorModalOpen} onClose={() => setIsCreatorModalOpen(false)} onSave={async (b) => { await api.content.createBox(b); refreshData(); handleViewChange(ViewState.MY_BOXES); }} currentUser={user} />
        {selectedBoxId && <LessonCreatorModal isOpen={isAddLessonModalOpen} onClose={() => setIsAddLessonModalOpen(false)} onSave={handleAddLesson} boxTitle={boxes.find(b => b.id === selectedBoxId)?.title || ''} />}
-       {user && <EditProfileModal isOpen={isEditProfileModalOpen} onClose={() => setIsEditProfileModalOpen(false)} onSave={api.social.toggleFollow as any} user={user} />}
-       {pendingPurchase && <PaymentModal isOpen={!!pendingPurchase} onClose={() => setPendingPurchase(null)} onConfirm={handleConfirmPayment} amount={pendingPurchase.amount} cost={pendingPurchase.cost} />}
+       {user && <EditProfileModal isOpen={isEditProfileModalOpen} onClose={() => setIsEditProfileModalOpen(false)} onSave={handleSaveProfile} user={user} />}
+       {pendingPurchase && <PaymentModal isOpen={!!pendingPurchase} onClose={() => setPendingPurchase(null)} amount={pendingPurchase.amount} cost={pendingPurchase.cost} onConfirm={async () => { await api.wallet.purchasePoints(user!.id, pendingPurchase.amount); setPendingPurchase(null); refreshData(); }} />}
     </div>
   );
 }

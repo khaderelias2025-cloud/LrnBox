@@ -7,125 +7,53 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <script>
-      // Shim process.env for browser compatibility
-      window.process = window.process || { env: {} };
+      // Robust process shim for browser-side libraries
+      window.process = { 
+        env: { 
+          NODE_ENV: 'production'
+        },
+        version: 'v1.0.0',
+        nextTick: (fn) => setTimeout(fn, 0)
+      };
       
       tailwind.config = {
         theme: {
           extend: {
-            fontFamily: {
-              sans: ['Inter', 'sans-serif'],
-            },
+            fontFamily: { sans: ['Inter', 'sans-serif'] },
             colors: {
-              primary: {
-                50: '#eff6ff',
-                100: '#dbeafe',
-                200: '#bfdbfe',
-                300: '#93c5fd',
-                400: '#60a5fa',
-                500: '#3b82f6',
-                600: '#0a66c2', /* LinkedIn Blue-ish */
-                700: '#1d4ed8',
-                800: '#1e40af',
-                900: '#1e3a8a',
-              },
-              slate: {
-                50: '#f8fafc', /* App Background */
-                100: '#f1f5f9',
-                800: '#1e293b',
-                900: '#0f172a',
-              }
-            },
-            animation: {
-              'fade-in': 'fadeIn 0.5s ease-out',
-              'slide-up': 'slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1)',
-              'slide-down': 'slideDown 0.4s ease-out',
-              'scale-in': 'scaleIn 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
-              'pulse-slow': 'pulse 3s infinite',
-              'float': 'float 6s ease-in-out infinite',
-              'wiggle': 'wiggle 1s ease-in-out infinite',
-            },
-            keyframes: {
-              fadeIn: {
-                '0%': { opacity: '0' },
-                '100%': { opacity: '1' },
-              },
-              slideUp: {
-                '0%': { transform: 'translateY(20px)', opacity: '0' },
-                '100%': { transform: 'translateY(0)', opacity: '1' },
-              },
-              slideDown: {
-                '0%': { transform: 'translateY(-20px)', opacity: '0' },
-                '100%': { transform: 'translateY(0)', opacity: '1' },
-              },
-              scaleIn: {
-                '0%': { transform: 'scale(0.95)', opacity: '0' },
-                '100%': { transform: 'scale(1)', opacity: '1' },
-              },
-              float: {
-                '0%, 100%': { transform: 'translateY(0)' },
-                '50%': { transform: 'translateY(-10px)' },
-              },
-              wiggle: {
-                '0%, 100%': { transform: 'rotate(-3deg)' },
-                '50%': { transform: 'rotate(3deg)' },
-              }
+              primary: { 50: '#eff6ff', 100: '#dbeafe', 200: '#bfdbfe', 300: '#93c5fd', 400: '#60a5fa', 500: '#3b82f6', 600: '#0a66c2', 700: '#1d4ed8', 800: '#1e40af', 900: '#1e3a8a' },
+              slate: { 50: '#f8fafc', 100: '#f1f5f9', 800: '#1e293b', 900: '#0f172a' }
             }
           }
         }
       }
     </script>
     <style>
-      body {
-        background-color: #f3f2ef; /* Professional light gray background */
-      }
-      /* Custom scrollbar for better aesthetics */
-      ::-webkit-scrollbar {
-        width: 8px;
-      }
-      ::-webkit-scrollbar-track {
-        background: #f1f5f9;
-      }
-      ::-webkit-scrollbar-thumb {
-        background: #cbd5e1;
-        border-radius: 4px;
-      }
-      ::-webkit-scrollbar-thumb:hover {
-        background: #94a3b8;
-      }
-
-      /* Animation Utilities */
-      .animate-enter {
-        animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) backwards;
-      }
-      
-      .stagger-1 > *:nth-child(1) { animation-delay: 0ms; }
-      .stagger-1 > *:nth-child(2) { animation-delay: 50ms; }
-      .stagger-1 > *:nth-child(3) { animation-delay: 100ms; }
-      .stagger-1 > *:nth-child(4) { animation-delay: 150ms; }
-      .stagger-1 > *:nth-child(5) { animation-delay: 200ms; }
-      .stagger-1 > *:nth-child(6) { animation-delay: 250ms; }
-      .stagger-1 > *:nth-child(7) { animation-delay: 300ms; }
-      .stagger-1 > *:nth-child(8) { animation-delay: 350ms; }
-      .stagger-1 > *:nth-child(9) { animation-delay: 400ms; }
-      .stagger-1 > *:nth-child(10) { animation-delay: 450ms; }
+      body { background-color: #f3f2ef; }
+      ::-webkit-scrollbar { width: 8px; }
+      ::-webkit-scrollbar-track { background: #f1f5f9; }
+      ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+      ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+      .animate-enter { animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) backwards; }
+      @keyframes slideUp { 0% { transform: translateY(20px); opacity: 0; } 100% { transform: translateY(0); opacity: 1; } }
     </style>
-  <script type="importmap">
+    <script type="importmap">
 {
   "imports": {
     "react": "https://esm.sh/react@19.2.1",
-    "react/": "https://esm.sh/react@19.2.1/",
     "react-dom": "https://esm.sh/react-dom@19.2.1",
-    "react-dom/": "https://esm.sh/react-dom@19.2.1/",
     "react-dom/client": "https://esm.sh/react-dom@19.2.1/client",
     "@google/genai": "https://esm.sh/@google/genai@1.33.0",
     "lucide-react": "https://esm.sh/lucide-react@0.561.0?deps=react@19.2.1",
-    "recharts": "https://esm.sh/recharts@3.6.0?deps=react@19.2.1,react-dom@19.2.1"
+    "recharts": "https://esm.sh/recharts@3.6.0?deps=react@19.2.1,react-dom@19.2.1",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/"
   }
 }
 </script>
-</head>
+  </head>
   <body>
     <div id="root"></div>
+    <script type="module" src="./index.tsx"></script>
   </body>
 </html>

@@ -1,5 +1,5 @@
 
-import { Box, User, Transaction, Notification, Conversation, Event, Reminder, Group } from '../types';
+import { Box, User, Transaction, Notification, Conversation, Event, Reminder, Group, TutorSession } from '../types';
 import { 
   MOCK_BOXES, 
   MOCK_USERS, 
@@ -20,7 +20,8 @@ const KEYS = {
   CONVERSATIONS: 'lrnbox_conversations',
   EVENTS: 'lrnbox_events',
   REMINDERS: 'lrnbox_reminders',
-  GROUPS: 'lrnbox_groups'
+  GROUPS: 'lrnbox_groups',
+  TUTOR_SESSIONS: 'lrnbox_tutor_sessions'
 };
 
 const load = <T>(key: string, defaultValue: T): T => {
@@ -51,6 +52,7 @@ export const storageService = {
     if (!localStorage.getItem(KEYS.EVENTS)) save(KEYS.EVENTS, MOCK_EVENTS);
     if (!localStorage.getItem(KEYS.REMINDERS)) save(KEYS.REMINDERS, MOCK_REMINDERS);
     if (!localStorage.getItem(KEYS.GROUPS)) save(KEYS.GROUPS, MOCK_GROUPS);
+    if (!localStorage.getItem(KEYS.TUTOR_SESSIONS)) save(KEYS.TUTOR_SESSIONS, []);
   },
 
   getBoxes: (): Box[] => load(KEYS.BOXES, MOCK_BOXES),
@@ -62,6 +64,7 @@ export const storageService = {
   getEvents: (): Event[] => load(KEYS.EVENTS, MOCK_EVENTS),
   getReminders: (): Reminder[] => load(KEYS.REMINDERS, MOCK_REMINDERS),
   getGroups: (): Group[] => load(KEYS.GROUPS, MOCK_GROUPS),
+  getTutorSessions: (): TutorSession[] => load(KEYS.TUTOR_SESSIONS, []),
 
   saveBoxes: (boxes: Box[]) => save(KEYS.BOXES, boxes),
   saveUsers: (users: User[]) => save(KEYS.USERS, users),
@@ -72,6 +75,7 @@ export const storageService = {
   saveEvents: (events: Event[]) => save(KEYS.EVENTS, events),
   saveReminders: (reminders: Reminder[]) => save(KEYS.REMINDERS, reminders),
   saveGroups: (groups: Group[]) => save(KEYS.GROUPS, groups),
+  saveTutorSessions: (sessions: TutorSession[]) => save(KEYS.TUTOR_SESSIONS, sessions),
   
   clearSession: () => localStorage.removeItem(KEYS.CURRENT_USER),
 
