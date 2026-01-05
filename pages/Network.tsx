@@ -80,7 +80,8 @@ const Network: React.FC<NetworkProps> = ({
   const followingIds = currentUser.following || [];
   const followerIds = currentUser.followers || [];
 
-  const connections = allUsers.filter(u => followingIds.includes(u.id) && followerIds.includes(u.id));
+  const connections = allUsers.filter(u => followingIds.includes(u.id) && u.role !== 'institute');
+  
   const peopleFollowing = allUsers.filter(u => followingIds.includes(u.id) && u.role !== 'institute');
   const peopleFollowers = allUsers.filter(u => followerIds.includes(u.id));
   const institutesFollowing = allUsers.filter(u => followingIds.includes(u.id) && u.role === 'institute');
@@ -215,20 +216,30 @@ const Network: React.FC<NetworkProps> = ({
   );
 
   const renderDiscover = () => {
-    const filteredRecommendations = peopleToDiscover.filter(user => {
+    const recommendations = [...pendingFollowBacks, ...peopleToDiscover];
+    const filteredRecommendations = recommendations.filter(user => {
         if (recommendationFilter === 'people') return user.role !== 'institute';
         if (recommendationFilter === 'institutes') return user.role === 'institute';
         return true;
     });
+
     return (
         <div className="space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-2"><h2 className="text-xl font-bold text-slate-900">People & Institutes you may know</h2><div className="flex bg-slate-100 p-1 rounded-lg self-start sm:self-auto">{(['all', 'people', 'institutes'] as const).map(filter => (<button key={filter} onClick={() => setRecommendationFilter(filter)} className={`px-4 py-1.5 text-xs font-bold rounded-md capitalize transition-all ${recommendationFilter === filter ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{filter}</button>))}</div></div>
         {filteredRecommendations.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredRecommendations.slice(0, 9).map(user => {
+            {filteredRecommendations.slice(0, 12).map(user => {
                 const isInstitute = user.role === 'institute';
+                const followsMe = followerIds.includes(user.id);
                 return (
-                    <div key={user.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col items-center text-center relative group hover:shadow-md transition-shadow"><button onClick={() => handleIgnore(user.id)} className="absolute top-2 right-2 text-slate-300 hover:text-slate-50 opacity-0 group-hover:opacity-100 transition-opacity"><X size={16} /></button><img src={user.avatar} className={`w-16 h-16 mb-2 object-cover ${isInstitute ? 'rounded-2xl shadow-sm border border-slate-100' : 'rounded-full'}`} alt={user.name} /><div className="flex items-center gap-1.5"><h3 className="font-bold text-slate-900">{user.name}</h3>{isInstitute && <Building2 size={14} className="text-indigo-600" />}</div><p className={`text-xs mb-3 font-medium ${isInstitute ? 'text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded' : 'text-slate-500'}`}>{isInstitute ? (user.instituteType || 'Organization') : user.role}</p><button onClick={() => onToggleFollow(user.id)} className={`mt-auto bg-white border px-4 py-1.5 rounded-full text-sm font-bold transition-colors w-full flex items-center justify-center gap-1 ${isInstitute ? 'border-indigo-600 text-indigo-600 hover:bg-indigo-50' : 'border-primary-600 text-primary-600 hover:bg-primary-50'}`}>{isInstitute ? <Plus size={14} /> : <UserPlus size={14} />}{isInstitute ? 'Follow' : 'Connect'}</button></div>
+                    <div key={user.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col items-center text-center relative group hover:shadow-md transition-shadow">
+                        <button onClick={() => handleIgnore(user.id)} className="absolute top-2 right-2 text-slate-300 hover:text-slate-50 opacity-0 group-hover:opacity-100 transition-opacity"><X size={16} /></button>
+                        <img src={user.avatar} className={`w-16 h-16 mb-2 object-cover ${isInstitute ? 'rounded-2xl shadow-sm border border-slate-100' : 'rounded-full'}`} alt={user.name} />
+                        <div className="flex items-center gap-1.5"><h3 className="font-bold text-slate-900">{user.name}</h3>{isInstitute && <Building2 size={14} className="text-indigo-600" />}</div>
+                        <p className={`text-xs mb-1 font-medium ${isInstitute ? 'text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded' : 'text-slate-500'}`}>{isInstitute ? (user.instituteType || 'Organization') : user.role}</p>
+                        {followsMe && <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold uppercase mb-3 tracking-tight">Follows You</span>}
+                        <button onClick={() => onToggleFollow(user.id)} className={`mt-auto bg-white border px-4 py-1.5 rounded-full text-sm font-bold transition-colors w-full flex items-center justify-center gap-1 ${isInstitute ? 'border-indigo-600 text-indigo-600 hover:bg-indigo-50' : 'border-primary-600 text-primary-600 hover:bg-primary-50'}`}>{isInstitute ? <Plus size={14} /> : <UserPlus size={14} />}{isInstitute ? 'Follow' : 'Connect'}</button>
+                    </div>
                 );
             })}
             </div>
@@ -243,26 +254,57 @@ const Network: React.FC<NetworkProps> = ({
       <div className="space-y-4">
           <div className="flex justify-between items-center">
             <h2 className="text-xl font-bold text-slate-900">My Connections ({connections.length})</h2>
-            <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} /><input type="text" placeholder="Search connections" className="pl-9 pr-4 py-1.5 border border-slate-200 rounded-lg text-sm bg-white" value={connectionSearch} onChange={(e) => setConnectionSearch(e.target.value)}/></div>
+            <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} /><input type="text" placeholder="Search connections" className="pl-9 pr-4 py-1.5 border border-slate-200 rounded-lg text-sm bg-white shadow-sm outline-none focus:ring-2 focus:ring-primary-100" value={connectionSearch} onChange={(e) => setConnectionSearch(e.target.value)}/></div>
           </div>
           {connections.length > 0 ? (
-              <div className="bg-white rounded-xl border border-slate-200 divide-y divide-slate-100">
-                  {connections.filter(u => u.name.toLowerCase().includes(connectionSearch.toLowerCase())).map(user => (
-                      <div key={user.id} className="p-4 flex items-center justify-between"><div className="flex items-center gap-3"><img src={user.avatar} className="w-10 h-10 rounded-full object-cover" alt={user.name} /><div><h3 className="font-bold text-slate-900 text-sm">{user.name}</h3><p className="text-xs text-slate-500">{user.bio || user.role}</p></div></div><div className="flex gap-2"><button onClick={() => onMessage(user.id)} className="p-2 text-slate-500 hover:bg-slate-100 rounded-full"><MessageCircle size={18} /></button><button onClick={() => onToggleFollow(user.id)} className="p-2 text-slate-500 hover:bg-red-50 hover:text-red-600 rounded-full"><UserMinus size={18} /></button></div></div>
-                  ))}
+              <div className="bg-white rounded-xl border border-slate-200 divide-y divide-slate-100 shadow-sm">
+                  {connections.filter(u => u.name.toLowerCase().includes(connectionSearch.toLowerCase())).map(user => {
+                      const mutual = followerIds.includes(user.id);
+                      return (
+                        <div key={user.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                            <div className="flex items-center gap-3">
+                                <div className="relative">
+                                    <img src={user.avatar} className="w-11 h-11 rounded-full object-cover border border-slate-100" alt={user.name} />
+                                    {mutual && <div className="absolute -bottom-1 -right-1 bg-green-500 border-2 border-white w-3.5 h-3.5 rounded-full" title="Mutual Connection"></div>}
+                                </div>
+                                <div>
+                                    <div className="flex items-center gap-2">
+                                        <h3 className="font-bold text-slate-900 text-sm">{user.name}</h3>
+                                        {mutual && <span className="text-[10px] text-green-600 font-bold bg-green-50 px-1.5 rounded">Mutual</span>}
+                                    </div>
+                                    <p className="text-xs text-slate-500">{user.bio || user.role}</p>
+                                </div>
+                            </div>
+                            <div className="flex gap-2">
+                                <button onClick={() => onMessage(user.id)} className="p-2 text-primary-600 hover:bg-primary-50 rounded-full transition-colors" title="Message"><MessageCircle size={20} /></button>
+                                <button onClick={() => onToggleFollow(user.id)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors" title="Remove Connection"><UserMinus size={20} /></button>
+                            </div>
+                        </div>
+                      );
+                  })}
               </div>
-          ) : <p className="text-slate-500">You don't have any connections yet.</p>}
+          ) : (
+            <div className="text-center py-20 bg-white rounded-2xl border-2 border-dashed border-slate-100">
+                <Users size={48} className="mx-auto text-slate-200 mb-3" />
+                <h3 className="text-lg font-bold text-slate-700">Your network is empty</h3>
+                <p className="text-slate-500 text-sm mb-6">Start connecting with other learners and experts.</p>
+                <button onClick={() => setActiveSection('discover')} className="bg-primary-600 text-white px-6 py-2 rounded-full font-bold text-sm hover:bg-primary-700 shadow-lg shadow-primary-600/20">Find People</button>
+            </div>
+          )}
       </div>
   );
 
   const renderFollowing = () => (
       <div className="space-y-4">
-          <div className="flex gap-4 border-b border-slate-200"><button onClick={() => setFollowingTab('following')} className={`pb-2 font-bold text-sm ${followingTab === 'following' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-slate-500'}`}>Following ({peopleFollowing.length})</button><button onClick={() => setFollowingTab('followers')} className={`pb-2 font-bold text-sm ${followingTab === 'followers' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-slate-500'}`}>Followers ({peopleFollowers.length})</button></div>
-          <div className="bg-white rounded-xl border border-slate-200 divide-y divide-slate-100">
-              {(followingTab === 'following' ? peopleFollowing : peopleFollowers).map(user => (
-                  <div key={user.id} className="p-4 flex items-center justify-between"><div className="flex items-center gap-3"><img src={user.avatar} className="w-10 h-10 rounded-full object-cover" alt={user.name} /><div><h3 className="font-bold text-slate-900 text-sm">{user.name}</h3><p className="text-xs text-slate-500">{user.handle}</p></div></div><button onClick={() => onToggleFollow(user.id)} className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-colors ${followingIds.includes(user.id) ? 'border-slate-300 text-slate-600 hover:bg-slate-50' : 'bg-primary-600 text-white border-primary-600 hover:bg-primary-700'}`}>{followingIds.includes(user.id) ? 'Following' : 'Follow Back'}</button></div>
-              ))}
-              {(followingTab === 'following' ? peopleFollowing : peopleFollowers).length === 0 && (<div className="p-8 text-center text-slate-500">List is empty.</div>)}
+          <div className="flex gap-4 border-b border-slate-200"><button onClick={() => setFollowingTab('following')} className={`pb-2 font-bold text-sm transition-all ${followingTab === 'following' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-slate-500 hover:text-slate-700'}`}>Following ({peopleFollowing.length + institutesFollowing.length})</button><button onClick={() => setFollowingTab('followers')} className={`pb-2 font-bold text-sm transition-all ${followingTab === 'followers' ? 'text-primary-600 border-b-2 border-primary-600' : 'text-slate-500 hover:text-slate-700'}`}>Followers ({peopleFollowers.length})</button></div>
+          <div className="bg-white rounded-xl border border-slate-200 divide-y divide-slate-100 shadow-sm">
+              {(followingTab === 'following' ? [...peopleFollowing, ...institutesFollowing] : peopleFollowers).map(user => {
+                  const isFollowing = followingIds.includes(user.id);
+                  return (
+                    <div key={user.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors"><div className="flex items-center gap-3"><img src={user.avatar} className="w-10 h-10 rounded-full object-cover" alt={user.name} /><div><h3 className="font-bold text-slate-900 text-sm">{user.name}</h3><p className="text-xs text-slate-500">{user.handle}</p></div></div><button onClick={() => onToggleFollow(user.id)} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${isFollowing ? 'border-slate-300 text-slate-600 hover:bg-red-50 hover:text-red-600 hover:border-red-200' : 'bg-primary-600 text-white border-primary-600 hover:bg-primary-700'}`}>{isFollowing ? 'Following' : 'Follow Back'}</button></div>
+                  );
+              })}
+              {(followingTab === 'following' ? [...peopleFollowing, ...institutesFollowing] : peopleFollowers).length === 0 && (<div className="p-12 text-center text-slate-400 italic">No users found in this list.</div>)}
           </div>
       </div>
   );
@@ -272,9 +314,9 @@ const Network: React.FC<NetworkProps> = ({
           <h2 className="text-xl font-bold text-slate-900">Institutes I Follow</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {institutesFollowing.map(inst => (
-                  <div key={inst.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4"><img src={inst.avatar} className="w-12 h-12 rounded-lg object-cover" alt={inst.name} /><div className="flex-1 min-w-0"><h3 className="font-bold text-slate-900 truncate">{inst.name}</h3><p className="text-xs text-slate-500">{inst.instituteType}</p></div><button onClick={() => onToggleFollow(inst.id)} className="text-xs font-bold text-slate-500 border border-slate-300 px-3 py-1 rounded-full hover:bg-slate-50">Following</button></div>
+                  <div key={inst.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4"><img src={inst.avatar} className="w-12 h-12 rounded-lg object-cover" alt={inst.name} /><div className="flex-1 min-w-0"><h3 className="font-bold text-slate-900 truncate">{inst.name}</h3><p className="text-xs text-slate-500">{inst.instituteType}</p></div><button onClick={() => onToggleFollow(inst.id)} className="text-xs font-bold text-slate-500 border border-slate-300 px-3 py-1 rounded-full hover:bg-red-50 hover:text-red-600 transition-colors">Following</button></div>
               ))}
-              {institutesFollowing.length === 0 && <p className="text-slate-500">You are not following any institutes.</p>}
+              {institutesFollowing.length === 0 && <p className="text-slate-400 italic">You are not following any institutes.</p>}
           </div>
       </div>
   );
@@ -286,7 +328,7 @@ const Network: React.FC<NetworkProps> = ({
               {visibleEvents.map(event => (
                   <div key={event.id} className="bg-white border border-slate-200 rounded-xl p-4 flex gap-4 hover:shadow-md transition-shadow cursor-pointer" onClick={() => setViewEventId(event.id)}><div className="w-16 h-16 bg-indigo-50 rounded-lg flex flex-col items-center justify-center text-indigo-700 flex-shrink-0"><span className="text-xs font-bold uppercase">{event.date.split(' ')[0]}</span><span className="text-xl font-bold">{event.date.split(' ')[1].replace(',', '')}</span></div><div className="flex-1"><div className="flex justify-between items-start"><div><h3 className="font-bold text-slate-900">{event.title}</h3><p className="text-xs text-slate-500 flex items-center gap-1 mt-1"><Clock size={12} /> {event.time} • <MapPin size={12} /> {event.isOnline ? 'Online' : event.location}</p></div>{event.isPrivate && <Lock size={14} className="text-slate-400" />}</div><div className="flex justify-between items-center mt-3"><div className="text-xs text-slate-500">{event.attendees} attendees</div><div className="flex gap-2"><button onClick={(e) => { e.stopPropagation(); setSharingEventId(event.id); }} className="text-slate-400 hover:text-blue-600 p-1"><Share2 size={16} /></button><button onClick={(e) => { e.stopPropagation(); handleJoinEvent(event.id); }} className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${event.isJoined ? 'bg-green-100 text-green-700' : 'bg-primary-600 text-white hover:bg-primary-700'}`}>{event.isJoined ? 'Going' : 'Join'}</button>{event.creatorId === currentUser.id && (<button onClick={(e) => { e.stopPropagation(); openInviteModal(event); }} className="text-xs font-bold text-primary-600 hover:bg-primary-50 px-3 py-1 rounded-full border border-primary-200">Invite</button>)}</div></div></div></div>
               ))}
-              {visibleEvents.length === 0 && <p className="text-slate-500">No upcoming events.</p>}
+              {visibleEvents.length === 0 && <p className="text-slate-400 italic">No upcoming events.</p>}
           </div>
       </div>
   );
@@ -294,14 +336,14 @@ const Network: React.FC<NetworkProps> = ({
   const renderHashtags = () => (
       <div className="space-y-4">
           <h2 className="text-xl font-bold text-slate-900">Followed Hashtags</h2>
-          <div className="flex flex-wrap gap-2">{MOCK_FOLLOWED_TAGS.map(tag => (<div key={tag.tag} className="bg-white border border-slate-200 px-3 py-2 rounded-lg flex items-center gap-2"><span className="font-bold text-slate-700">{tag.tag}</span><span className="text-xs text-slate-400">{tag.posts} posts</span><button className="text-slate-400 hover:text-red-500"><X size={14} /></button></div>))}</div>
+          <div className="flex flex-wrap gap-2">{MOCK_FOLLOWED_TAGS.map(tag => (<div key={tag.tag} className="bg-white border border-slate-200 px-3 py-2 rounded-lg flex items-center gap-2 shadow-sm"><span className="font-bold text-slate-700">{tag.tag}</span><span className="text-xs text-slate-400">{tag.posts} posts</span><button className="text-slate-300 hover:text-red-500 transition-colors"><X size={14} /></button></div>))}</div>
       </div>
   );
 
   const renderFindPeople = () => (
       <div className="space-y-4">
           <h2 className="text-xl font-bold text-slate-900">Find People</h2>
-          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm"><input type="text" placeholder="Search by name, role, or interest..." className="w-full p-3 border border-slate-200 rounded-lg mb-4 outline-none focus:ring-2 focus:ring-primary-500 bg-white" value={findPeopleSearchTerm} onChange={e => setFindPeopleSearchTerm(e.target.value)} /><div className="space-y-2">{allUsers.filter(u => u.id !== currentUser.id && (u.name.toLowerCase().includes(findPeopleSearchTerm.toLowerCase()) || u.bio.toLowerCase().includes(findPeopleSearchTerm.toLowerCase()))).map(user => (<div key={user.id} className="flex items-center justify-between p-3 border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors rounded-lg"><div className="flex items-center gap-3"><img src={user.avatar} className="w-10 h-10 rounded-full object-cover" alt={user.name} /><div><h4 className="font-bold text-slate-900 text-sm">{user.name}</h4><p className="text-xs text-slate-500 line-clamp-1">{user.bio}</p></div></div><button onClick={() => onToggleFollow(user.id)} className={`px-3 py-1 rounded-full text-xs font-bold border transition-colors ${followingIds.includes(user.id) ? 'bg-white border-slate-300 text-slate-600' : 'bg-primary-600 text-white border-primary-600'}`}>{followingIds.includes(user.id) ? 'Following' : 'Follow'}</button></div>))}</div></div>
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm"><input type="text" placeholder="Search by name, role, or interest..." className="w-full p-3 border border-slate-200 rounded-lg mb-4 outline-none focus:ring-2 focus:ring-primary-500 bg-white" value={findPeopleSearchTerm} onChange={e => setFindPeopleSearchTerm(e.target.value)} /><div className="space-y-2">{allUsers.filter(u => u.id !== currentUser.id && (u.name.toLowerCase().includes(findPeopleSearchTerm.toLowerCase()) || u.bio.toLowerCase().includes(findPeopleSearchTerm.toLowerCase()))).map(user => (<div key={user.id} className="flex items-center justify-between p-3 border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors rounded-lg"><div className="flex items-center gap-3"><img src={user.avatar} className="w-10 h-10 rounded-full object-cover" alt={user.name} /><div><h4 className="font-bold text-slate-900 text-sm">{user.name}</h4><p className="text-xs text-slate-500 line-clamp-1">{user.bio}</p></div></div><button onClick={() => onToggleFollow(user.id)} className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-colors ${followingIds.includes(user.id) ? 'bg-white border-slate-300 text-slate-600 hover:bg-red-50 hover:text-red-600' : 'bg-primary-600 text-white border-primary-600 hover:bg-primary-700'}`}>{followingIds.includes(user.id) ? 'Following' : 'Connect'}</button></div>))}</div></div>
       </div>
   );
 
@@ -309,12 +351,12 @@ const Network: React.FC<NetworkProps> = ({
     <div className="max-w-6xl mx-auto py-6 px-4">
       <div className="md:hidden mb-6 -mx-4 px-4 overflow-x-auto no-scrollbar"><div className="flex gap-2 min-w-max pb-1"><MobileNavItem id="discover" icon={UserPlus} label="Discover" /><MobileNavItem id="connections" icon={Users} label="Connections" /><MobileNavItem id="following" icon={UserIcon} label="Following" /><MobileNavItem id="institutes" icon={Building2} label="Institutes" /><MobileNavItem id="events" icon={Calendar} label="Events" /><MobileNavItem id="groups" icon={Users} label="Groups" /><MobileNavItem id="hashtags" icon={Hash} label="Tags" /><MobileNavItem id="find_people" icon={Search} label="Search" /></div></div>
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="hidden md:block md:col-span-1"><div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden sticky top-24"><h3 className="p-4 font-semibold text-slate-900 border-b border-slate-100">Manage my network</h3><div className="flex flex-col"><SidebarItem id="connections" icon={Users} label="Connections" count={connections.length} /><SidebarItem id="following" icon={UserIcon} label="Following & Followers" count={peopleFollowing.length + peopleFollowers.length} /><SidebarItem id="groups" icon={Users} label="Groups" count={myGroups.length} /><SidebarItem id="institutes" icon={Building2} label="Institutes" count={institutesFollowing.length} /><SidebarItem id="events" icon={Calendar} label="Events" count={visibleEvents.length} /><SidebarItem id="hashtags" icon={Hash} label="Hashtags" count={MOCK_FOLLOWED_TAGS.length} /><SidebarItem id="find_people" icon={Search} label="Find People" />{activeSection !== 'discover' && (<div className="border-t border-slate-100 mt-2 pt-2"><SidebarItem id="discover" icon={UserPlus} label="Discover" /></div>)}</div><div className="mt-auto border-t border-slate-100 p-4 text-center"><p className="text-xs text-slate-500 mb-2">Grow your skills with Premium</p><button className="text-sm font-bold text-indigo-600 hover:underline">Try Premium for Free</button></div></div></div>
+        <div className="hidden md:block md:col-span-1"><div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden sticky top-24"><h3 className="p-4 font-semibold text-slate-900 border-b border-slate-100">Manage my network</h3><div className="flex flex-col"><SidebarItem id="connections" icon={Users} label="Connections" count={connections.length} /><SidebarItem id="following" icon={UserIcon} label="Following & Followers" count={peopleFollowing.length + peopleFollowers.length + institutesFollowing.length} /><SidebarItem id="groups" icon={Users} label="Groups" count={myGroups.length} /><SidebarItem id="institutes" icon={Building2} label="Institutes" count={institutesFollowing.length} /><SidebarItem id="events" icon={Calendar} label="Events" count={visibleEvents.length} /><SidebarItem id="hashtags" icon={Hash} label="Hashtags" count={MOCK_FOLLOWED_TAGS.length} /><SidebarItem id="find_people" icon={Search} label="Find People" />{activeSection !== 'discover' && (<div className="border-t border-slate-100 mt-2 pt-2"><SidebarItem id="discover" icon={UserPlus} label="Discover" /></div>)}</div><div className="mt-auto border-t border-slate-100 p-4 text-center"><p className="text-xs text-slate-500 mb-2">Grow your skills with Premium</p><button className="text-sm font-bold text-indigo-600 hover:underline">Try Premium for Free</button></div></div></div>
         <div className="md:col-span-3">{activeSection === 'discover' && renderDiscover()}{activeSection === 'connections' && renderConnections()}{activeSection === 'following' && renderFollowing()}{activeSection === 'institutes' && renderInstitutes()}{activeSection === 'events' && renderEvents()}{activeSection === 'hashtags' && renderHashtags()}{activeSection === 'find_people' && renderFindPeople()}{activeSection === 'groups' && renderGroups()}</div>
       </div>
       <CreateEventModal isOpen={isEventModalOpen} onClose={() => setIsEventModalOpen(false)} onCreate={handleCreateEvent} />
       <CohortModal isOpen={isGroupModalOpen} onClose={() => setIsGroupModalOpen(false)} currentUser={currentUser} allUsers={allUsers} onSave={handleSaveGroup} existingGroup={editingGroup} />
-      {viewingGroup && (<CohortDetailModal isOpen={!!viewingGroup} onClose={() => setViewingGroupId(null)} cohort={viewingGroup} currentUser={currentUser} allUsers={allUsers} sharedBoxes={boxes.filter(b => b.sharedWithGroupIds?.includes(viewingGroup.id))} sharedEvents={events.filter(e => e.sharedWithGroupIds?.includes(viewingGroup.id))} conversation={conversations.find(c => c.groupId === viewingGroup.id)} onSendMessage={handleGroupMessageSend} onViewBox={(id) => { setViewingGroupId(null); if (onGroupViewBox) onGroupViewBox(id); }} onViewEvent={(id) => { setViewingGroupId(null); setViewEventId(id); }} />)}
+      {viewingGroup && (<CohortDetailModal isOpen={!!viewingGroup} onClose={() => setViewingGroupId(null)} cohort={viewingGroup} currentUser={currentUser} allUsers={allUsers} sharedBoxes={boxes.filter(b => b.sharedWithGroupIds?.includes(viewingGroup.id))} sharedEvents={events.filter(e => e.sharedWithGroupIds?.includes(viewingGroup.id))} conversation={conversations.find(c => c.groupId === viewingGroup.id)} onSendMessage={handleGroupMessageSend} onViewBox={(id) => { setViewingGroupId(null); if (onGroupViewBox) onGroupViewBox(id); }} onViewEvent={(id) => { setViewingGroupId(null); setViewEventId(id); }} onUpdateGroup={onUpdateGroup} />)}
       {selectedEventForInvite && (<InviteUsersModal isOpen={isInviteModalOpen} onClose={() => setIsInviteModalOpen(false)} event={selectedEventForInvite} users={allUsers} onInvite={handleInviteUsers} groups={myGroups} />)}
       {sharingEvent && (<ShareModal isOpen={true} onClose={() => setSharingEventId(null)} item={{ id: sharingEvent.id, title: sharingEvent.title, type: 'Event' }} allUsers={allUsers} currentUser={currentUser} onShare={handleShareEvent} groups={myGroups} />)}
       {viewEvent && (<EventDetailModal isOpen={!!viewEvent} onClose={() => setViewEventId(null)} event={viewEvent} onToggleJoin={handleJoinEvent} />)}

@@ -1,13 +1,13 @@
 
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { Lesson, QuizType, AssessmentQuestion, AssessmentContent, CrosswordWord } from '../types';
-import { generateMicroLesson, convertPdfToHtml, convertPptToHtml, generateAssessment, generateLessonVideo, generateLessonImage, generateLessonAudio } from '../services/geminiService';
+import { generateMicroLesson, convertPdfToHtml, convertPptToHtml, generateAssessment, generateLessonVideo, generateLessonImage, generateLessonAudio, generateImageExplanation } from '../services/geminiService';
 import { X, Wand2, Loader2, Save, Type, Video, HelpCircle, Image as ImageIcon, Music, FileCode, Package, MousePointerClick, Upload, Link as LinkIcon, FileText, Sparkles, Presentation, Trophy, Plus, Trash2, ChevronRight, ChevronDown, ListOrdered, Palette, Grid, Info, Database, Search, Film, AlertTriangle, Headphones } from 'lucide-react';
 
 interface LessonCreatorModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (lesson: Lesson) => void;
+  onSave: (lesson: Lesson) => void | Promise<void>;
   boxTitle: string;
   questionBank?: AssessmentQuestion[];
 }
@@ -29,8 +29,22 @@ const AUDIO_LOADING_MESSAGES = [
   "Finalizing podcast segment..."
 ];
 
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => {
+      const base64String = (reader.result as string).split(',')[1];
+      resolve(base64String);
+    };
+    reader.onerror = error => reject(error);
+  });
+};
+
 const LessonCreatorModal: React.FC<LessonCreatorModalProps> = ({ isOpen, onClose, onSave, boxTitle, questionBank = [] }) => {
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [explaining, setExplaining] = useState(false);
   const [videoLoadingMsgIndex, setVideoLoadingMsgIndex] = useState(0);
   const [audioLoadingMsgIndex, setAudioLoadingMsgIndex] = useState(0);
   const [activeType, setActiveType] = useState<'text' | 'video' | 'quiz' | 'image' | 'audio' | 'html5' | 'scorm' | 'interactive_video' | 'pdf' | 'ppt' | 'assessment'>('text');
@@ -40,7 +54,9 @@ const LessonCreatorModal: React.FC<LessonCreatorModalProps> = ({ isOpen, onClose
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [mediaUrl, setMediaUrl] = useState(''); 
+  const [imageExplanation, setImageExplanation] = useState('');
   const [html5Content, setHtml5Content] = useState('');
+  const [pptUrl, setPptUrl] = useState('');
   
   // Full Assessment State
   const [assessmentQuestions, setAssessmentQuestions] = useState<AssessmentQuestion[]>([]);
@@ -110,10 +126,36 @@ const LessonCreatorModal: React.FC<LessonCreatorModalProps> = ({ isOpen, onClose
     }
   };
 
+  const handlePptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setLoading(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+         const fullDataUrl = reader.result as string;
+         setPptUrl(fullDataUrl);
+      };
+      reader.readAsDataURL(file);
+
+      const base64 = await fileToBase64(file);
+      const interactiveHtml = await convertPptToHtml(base64);
+      setHtml5Content(interactiveHtml);
+      
+      if (!title) setTitle(file.name.replace(/\.[^/.]+$/, ""));
+      if (!content) setContent(`Interactive presentation of: ${file.name}`);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to process presentation for viewing. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleVideoAIGenerate = async () => {
     if (!aiPrompt) return;
 
-    // Veo Requirement: Paid API Key selection
     // @ts-ignore
     const hasKey = await window.aistudio.hasSelectedApiKey();
     if (!hasKey) {
@@ -151,6 +193,19 @@ const LessonCreatorModal: React.FC<LessonCreatorModalProps> = ({ isOpen, onClose
         alert("Image generation failed. Please try again.");
     } finally {
         setLoading(false);
+    }
+  };
+
+  const handleExplainImage = async () => {
+    if (!aiPrompt) return;
+    setExplaining(true);
+    try {
+        const explanation = await generateImageExplanation(aiPrompt);
+        setImageExplanation(explanation);
+    } catch (err) {
+        console.error(err);
+    } finally {
+        setExplaining(false);
     }
   };
 
@@ -196,49 +251,60 @@ const LessonCreatorModal: React.FC<LessonCreatorModalProps> = ({ isOpen, onClose
     setAssessmentQuestions(next);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!title) {
       alert("Please fill in the title.");
       return;
     }
 
-    const newLesson: Lesson = {
-      id: `l-user-${Date.now()}`,
-      boxId: 'temp',
-      title,
-      content,
-      type: activeType,
-      likes: 0,
-      completionCount: 0,
-      comments: [],
-      timestamp: 'Just now',
-      videoUrl: activeType === 'video' ? mediaUrl : undefined,
-      imageUrl: activeType === 'image' ? mediaUrl : undefined,
-      audioUrl: activeType === 'audio' ? mediaUrl : undefined,
-      html5Url: activeType === 'html5' ? mediaUrl : undefined,
-      html5Content: activeType === 'html5' ? html5Content : undefined,
-    };
-
-    if (activeType === 'assessment') {
-        newLesson.assessmentData = { questions: assessmentQuestions, passingScore };
-    } else if (activeType === 'quiz') {
-        newLesson.quizType = crosswordWords.length > 0 ? 'crossword' : 'mcq_single'; // Basic switch
-        newLesson.quizData = {
-            question: "Complete the puzzle",
-            crosswordWords: crosswordWords
+    setSaving(true);
+    try {
+        const newLesson: Lesson = {
+          id: `l-user-${Date.now()}`,
+          boxId: 'temp',
+          title,
+          content,
+          type: activeType,
+          likes: 0,
+          completionCount: 0,
+          comments: [],
+          timestamp: 'Just now',
+          videoUrl: activeType === 'video' ? mediaUrl : undefined,
+          imageUrl: activeType === 'image' ? mediaUrl : undefined,
+          imageExplanation: activeType === 'image' ? imageExplanation : undefined,
+          audioUrl: activeType === 'audio' ? mediaUrl : undefined,
+          html5Url: activeType === 'html5' ? mediaUrl : undefined,
+          html5Content: (activeType === 'html5' || activeType === 'ppt') ? html5Content : undefined,
+          pptUrl: activeType === 'ppt' ? pptUrl : undefined,
         };
-    }
 
-    onSave(newLesson);
-    resetForm();
-    onClose();
+        if (activeType === 'assessment') {
+            newLesson.assessmentData = { questions: assessmentQuestions, passingScore };
+        } else if (activeType === 'quiz') {
+            newLesson.quizType = crosswordWords.length > 0 ? 'crossword' : 'mcq_single';
+            newLesson.quizData = {
+                question: "Complete the puzzle",
+                crosswordWords: crosswordWords
+            };
+        }
+
+        await onSave(newLesson);
+        resetForm();
+        onClose();
+    } catch (err) {
+        console.error("Save failed", err);
+        alert("Failed to save lesson. Please try again.");
+    } finally {
+        setSaving(false);
+    }
   };
 
   const resetForm = () => {
-    setTitle(''); setContent(''); setMediaUrl(''); setHtml5Content('');
+    setTitle(''); setContent(''); setMediaUrl(''); setHtml5Content(''); setPptUrl('');
     setAssessmentQuestions([]); setPassingScore(80);
     setActiveType('text'); setTopic(''); setAssessmentQuestionCount(5);
     setShowBankPicker(false); setAiPrompt(''); setCrosswordWords([]);
+    setImageExplanation('');
   };
 
   const renderCrosswordWordEditor = (word: CrosswordWord, idx: number, updateFn: (idx: number, u: Partial<CrosswordWord>) => void, removeFn: (idx: number) => void) => (
@@ -426,7 +492,7 @@ const LessonCreatorModal: React.FC<LessonCreatorModalProps> = ({ isOpen, onClose
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh]">
-        <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-white">
+        <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
           <h2 className="font-bold text-lg text-slate-800">Add New Post</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
         </div>
@@ -578,15 +644,6 @@ const LessonCreatorModal: React.FC<LessonCreatorModalProps> = ({ isOpen, onClose
                                       </div>
                                     )}
 
-                                    {activeType === 'video' && (
-                                        <div className="flex items-start gap-2 bg-indigo-900/30 p-3 rounded-lg border border-indigo-500/20 mb-2">
-                                            <Info size={14} className="text-indigo-400 shrink-0 mt-0.5" />
-                                            <p className="text-[10px] text-indigo-200/70 leading-relaxed">
-                                                Generating video requires a paid API key. You will be prompted to select one from your authorized GCP projects.
-                                            </p>
-                                        </div>
-                                    )}
-
                                     <button 
                                         onClick={activeType === 'video' ? handleVideoAIGenerate : activeType === 'audio' ? handleAudioAIGenerate : handleImageAIGenerate}
                                         disabled={!aiPrompt}
@@ -673,10 +730,82 @@ const LessonCreatorModal: React.FC<LessonCreatorModalProps> = ({ isOpen, onClose
                     </div>
                 ) : (
                     <div className="space-y-4">
+                        {activeType === 'ppt' && (
+                            <div className="mb-6 animate-in fade-in zoom-in duration-300">
+                                <label className="block text-sm font-medium text-slate-700 mb-2">Upload Presentation</label>
+                                {loading ? (
+                                    <div className="border-2 border-dashed border-primary-200 rounded-2xl p-12 flex flex-col items-center justify-center bg-primary-50 text-center">
+                                        <Loader2 className="w-12 h-12 text-primary-600 animate-spin mb-4" />
+                                        <p className="font-bold text-primary-900 mb-1">Analyzing Presentation Content...</p>
+                                        <p className="text-xs text-primary-600">Gemini is building a browser-native interactive slide player.</p>
+                                    </div>
+                                ) : pptUrl ? (
+                                    <div className="bg-green-50 border border-green-200 rounded-xl p-4 flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <div className="p-2 bg-green-100 text-green-600 rounded-lg">
+                                                <Presentation size={20} />
+                                            </div>
+                                            <div>
+                                                <p className="text-sm font-bold text-green-900">Presentation Ready</p>
+                                                <p className="text-xs text-green-600">Interactive live viewer generated.</p>
+                                            </div>
+                                        </div>
+                                        <button 
+                                            onClick={() => { setPptUrl(''); setHtml5Content(''); if(fileInputRef.current) fileInputRef.current.value = ''; }}
+                                            className="text-xs font-bold text-red-600 hover:underline"
+                                        >
+                                            Replace File
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div 
+                                        onClick={() => fileInputRef.current?.click()}
+                                        className="border-2 border-dashed border-slate-300 rounded-2xl p-10 flex flex-col items-center justify-center bg-slate-50 hover:bg-slate-100 hover:border-primary-400 transition-all cursor-pointer group"
+                                    >
+                                        <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center shadow-sm mb-4 group-hover:scale-110 transition-transform text-[#D24726]">
+                                            <Presentation size={32} />
+                                        </div>
+                                        <p className="font-bold text-slate-800">Click to upload presentation</p>
+                                        <p className="text-xs text-slate-500 mt-1">Supports .ppt and .pptx files</p>
+                                        <input 
+                                            type="file" 
+                                            ref={fileInputRef}
+                                            className="hidden"
+                                            accept=".ppt,.pptx"
+                                            onChange={handlePptUpload}
+                                        />
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                        
                         <div>
                         <label className="block text-sm font-medium text-slate-700 mb-1">Title</label>
                         <input className="w-full border border-slate-200 rounded-lg p-2 text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500 bg-white" placeholder="Title" value={title} onChange={e => setTitle(e.target.value)} />
                         </div>
+                        
+                        {activeType === 'image' && (
+                            <div className="animate-in slide-in-from-top-2 duration-300">
+                                <div className="flex justify-between items-center mb-1.5">
+                                    <label className="block text-sm font-medium text-slate-700">Image Explanation (Optional)</label>
+                                    <button 
+                                        onClick={handleExplainImage}
+                                        disabled={explaining || !aiPrompt}
+                                        className="text-[10px] font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1 bg-indigo-50 px-2 py-1 rounded transition-all active:scale-95 disabled:opacity-50"
+                                    >
+                                        {explaining ? <Loader2 className="animate-spin" size={12} /> : <Sparkles size={12} />}
+                                        AI Explain
+                                    </button>
+                                </div>
+                                <textarea 
+                                    className="w-full border border-slate-200 rounded-lg p-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500 bg-white min-h-[80px] transition-all"
+                                    placeholder="Write a caption or educational explanation to appear under the image..."
+                                    value={imageExplanation}
+                                    onChange={e => setImageExplanation(e.target.value)}
+                                />
+                            </div>
+                        )}
+
                         {activeType === 'quiz' && (
                             <div className="space-y-3 pt-2">
                                 <div className="flex justify-between items-center">
@@ -713,7 +842,7 @@ const LessonCreatorModal: React.FC<LessonCreatorModalProps> = ({ isOpen, onClose
                                 )}
                             </div>
                         )}
-                        {['video', 'image', 'audio', 'html5', 'pdf', 'ppt'].includes(activeType) && (
+                        {['video', 'image', 'audio', 'html5', 'pdf'].includes(activeType) && (
                         <div>
                             <label className="block text-sm font-medium text-slate-700 mb-2">{activeType === 'video' ? 'Video / Media' : activeType === 'audio' ? 'Audio / Podcast' : 'Image / Media'} URL</label>
                             <input className="w-full border border-slate-200 rounded-lg p-2 text-sm text-slate-900 bg-white" placeholder="https://..." value={mediaUrl} onChange={e => setMediaUrl(e.target.value)} />
@@ -745,7 +874,14 @@ const LessonCreatorModal: React.FC<LessonCreatorModalProps> = ({ isOpen, onClose
 
         <div className="p-4 border-t border-slate-100 flex justify-end gap-3 bg-slate-50">
           <button onClick={onClose} className="text-slate-600 px-4 py-2 font-medium hover:text-slate-900">Cancel</button>
-          <button onClick={handleSave} className="bg-indigo-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-indigo-700 flex items-center gap-2 transition-all shadow-md active:scale-95"><Save size={18} /> Add to Box</button>
+          <button 
+            onClick={handleSave} 
+            disabled={saving}
+            className="bg-indigo-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-indigo-700 flex items-center gap-2 transition-all shadow-md active:scale-95 disabled:opacity-50"
+          >
+            {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />} 
+            {saving ? 'Adding...' : 'Add to Box'}
+          </button>
         </div>
       </div>
     </div>

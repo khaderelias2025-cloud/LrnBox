@@ -77,6 +77,7 @@ const BoxDetail: React.FC<BoxDetailProps> = ({
   const [isCreatePollOpen, setIsCreatePollOpen] = useState(false);
   const [questionBankSearch, setQuestionBankSearch] = useState('');
   const [participantSearch, setParticipantSearch] = useState('');
+  const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
   
   // AI Summary State
   const [boxSummary, setBoxSummary] = useState<string | null>(null);
@@ -631,9 +632,9 @@ const BoxDetail: React.FC<BoxDetailProps> = ({
 
       <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden mb-8 shadow-sm">
         <div className="h-60 w-full relative">
-          <img src={box.coverImage} alt={box.title} className="w-full h-full object-cover" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
-          <div className="absolute bottom-6 left-8 right-8 text-white flex justify-between items-end">
+          <img src={box.coverImage} alt={box.title} className="w-full h-full object-cover cursor-zoom-in" onClick={() => setFullscreenImage(box.coverImage)} />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent pointer-events-none" />
+          <div className="absolute bottom-6 left-8 right-8 text-white flex justify-between items-end pointer-events-none">
              <div className="flex-1 mr-4">
                 <div className="flex items-center gap-2 mb-2">
                     <span className="bg-primary-600 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider">{box.category}</span>
@@ -642,7 +643,7 @@ const BoxDetail: React.FC<BoxDetailProps> = ({
                 <h1 className="text-4xl font-bold">{box.title}</h1>
                 <p className="text-slate-200 text-sm mt-2 opacity-90 line-clamp-2">{box.description}</p>
              </div>
-             <div className="flex flex-col gap-3 shrink-0">
+             <div className="flex flex-col gap-3 shrink-0 pointer-events-auto">
                 {isCourseCompleted && !isContentLocked && box.hasCertificate && (
                     <button onClick={() => setShowCertificate(true)} className="bg-yellow-400 text-yellow-900 hover:bg-yellow-300 px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-xl animate-enter">
                         <Award size={22} /> Get Certificate
@@ -922,6 +923,26 @@ const BoxDetail: React.FC<BoxDetailProps> = ({
                     </div>
                 </form>
             </div>
+          </div>
+      )}
+
+      {fullscreenImage && (
+          <div 
+            className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-in fade-in duration-300"
+            onClick={() => setFullscreenImage(null)}
+          >
+              <button 
+                className="absolute top-6 right-6 text-white/70 hover:text-white transition-colors bg-white/10 hover:bg-white/20 p-2 rounded-full"
+                onClick={(e) => { e.stopPropagation(); setFullscreenImage(null); }}
+              >
+                  <X size={32} />
+              </button>
+              <img 
+                src={fullscreenImage} 
+                alt="Fullscreen" 
+                className="max-w-full max-h-full object-contain shadow-2xl rounded-sm animate-in zoom-in-95 duration-300"
+                onClick={(e) => e.stopPropagation()}
+              />
           </div>
       )}
 

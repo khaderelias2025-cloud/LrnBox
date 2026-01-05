@@ -1,6 +1,6 @@
 
 import { storageService } from './storage';
-import { User, Box, Lesson, Transaction, Notification, Conversation, TutorSession, ViewState, Comment, Event, Group } from '../types';
+import { User, Box, Lesson, Transaction, Notification, Conversation, Message, TutorSession, ViewState, Comment, Event, Group } from '../types';
 
 const delay = (ms: number = 400) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -88,213 +88,206 @@ export const api = {
       storageService.saveBoxes(boxes.filter(b => b.id !== boxId));
     },
     addLesson: async (boxId: string, lesson: Lesson): Promise<void> => {
-      await delay(500);
+      await delay(600);
       const boxes = storageService.getBoxes();
-      const updatedBoxes = boxes.map(b => {
-        if (b.id === boxId) {
-          return { ...b, lessons: [...(b.lessons || []), lesson] };
+      const updatedBoxes = boxes.map(box => {
+        if (box.id === boxId) {
+          const lessonWithId = { ...lesson, boxId };
+          return { ...box, lessons: [...box.lessons, lessonWithId] };
         }
-        return b;
+        return box;
       });
       storageService.saveBoxes(updatedBoxes);
     },
-    addComment: async (userId: string, lessonId: string, text: string): Promise<Comment> => {
+    addComment: async (userId: string, lessonId: string, content: string): Promise<void> => {
       await delay(300);
-      const users = storageService.getUsers();
-      const currentUser = users.find(u => u.id === userId);
       const boxes = storageService.getBoxes();
-      
-      if (!currentUser) throw new Error("User not found");
+      const users = storageService.getUsers();
+      const user = users.find(u => u.id === userId);
+      if (!user) return;
       
       const newComment: Comment = {
         id: `c-${Date.now()}`,
-        userId: currentUser.id,
-        userName: currentUser.name,
-        userAvatar: currentUser.avatar,
-        content: text,
+        userId: user.id,
+        userName: user.name,
+        userAvatar: user.avatar,
+        content: content,
         timestamp: 'Just now'
       };
-
-      let found = false;
-      boxes.forEach(box => {
-        box.lessons.forEach(lesson => {
+      
+      storageService.saveBoxes(boxes.map(box => ({
+        ...box,
+        lessons: box.lessons.map(lesson => {
           if (lesson.id === lessonId) {
-            lesson.comments = [...(lesson.comments || []), newComment];
-            found = true;
+            return { ...lesson, comments: [...(lesson.comments || []), newComment] };
           }
-        });
-      });
-
-      if (found) storageService.saveBoxes(boxes);
-      return newComment;
+          return lesson;
+        })
+      })));
     },
     completeLesson: async (userId: string, lessonId: string): Promise<void> => {
+      await delay(300);
       const boxes = storageService.getBoxes();
-      boxes.forEach(box => {
-        const lesson = box.lessons.find(l => l.id === lessonId);
-        if (lesson && !lesson.completedByUserIds?.includes(userId)) {
-          lesson.completedByUserIds = [...(lesson.completedByUserIds || []), userId];
-          lesson.completionCount = (lesson.completionCount || 0) + 1;
-        }
-      });
-      storageService.saveBoxes(boxes);
+      storageService.saveBoxes(boxes.map(box => ({
+        ...box,
+        lessons: box.lessons.map(lesson => {
+          if (lesson.id === lessonId) {
+            const completedByUserIds = lesson.completedByUserIds || [];
+            if (!completedByUserIds.includes(userId)) {
+              return { 
+                ...lesson, 
+                isCompleted: true, 
+                completionCount: (lesson.completionCount || 0) + 1,
+                completedByUserIds: [...completedByUserIds, userId]
+              };
+            }
+          }
+          return lesson;
+        })
+      })));
     }
   },
 
   social: {
-    toggleFollow: async (currentUserId: string, targetUserId: string): Promise<void> => {
-      const users = storageService.getUsers();
-      const currentUser = users.find(u => u.id === currentUserId);
-      const targetUser = users.find(u => u.id === targetUserId);
-      
-      if (!currentUser || !targetUser) return;
-      
-      const isFollowing = currentUser.following.includes(targetUserId);
-      if (isFollowing) {
-        currentUser.following = currentUser.following.filter(id => id !== targetUserId);
-        targetUser.followers = targetUser.followers.filter(id => id !== currentUserId);
-      } else {
-        currentUser.following.push(targetUserId);
-        targetUser.followers.push(currentUserId);
-        
-        const notif: Notification = {
-          id: `n-${Date.now()}`,
-          type: 'follow',
-          actorId: currentUser.id,
-          actorName: currentUser.name,
-          actorAvatar: currentUser.avatar,
-          content: 'started following you',
-          timestamp: 'Just now',
-          isRead: false
-        };
-        const notifs = storageService.getNotifications();
-        storageService.saveNotifications([notif, ...notifs]);
-      }
-      
-      storageService.saveUsers(users);
-      storageService.saveCurrentUser(currentUser);
-    },
-    toggleFavorite: async (userId: string, boxId: string): Promise<boolean> => {
+    toggleFavorite: async (userId: string, boxId: string): Promise<void> => {
+      await delay(300);
       const users = storageService.getUsers();
       const user = users.find(u => u.id === userId);
-      if (!user) return false;
+      if (!user) return;
       
       const favorites = user.favoriteBoxIds || [];
-      const isFav = favorites.includes(boxId);
-      if (isFav) {
+      if (favorites.includes(boxId)) {
         user.favoriteBoxIds = favorites.filter(id => id !== boxId);
       } else {
         user.favoriteBoxIds = [...favorites, boxId];
       }
       
-      storageService.saveUsers(users);
+      storageService.saveUsers(users.map(u => u.id === userId ? user : u));
       storageService.saveCurrentUser(user);
-      return !isFav;
     },
-    toggleSaveLesson: async (userId: string, lessonId: string): Promise<boolean> => {
-        const users = storageService.getUsers();
-        const user = users.find(u => u.id === userId);
-        if (!user) return false;
-        
-        const saved = user.savedLessonIds || [];
-        const isSaved = saved.includes(lessonId);
-        if (isSaved) {
-            user.savedLessonIds = saved.filter(id => id !== lessonId);
-        } else {
-            user.savedLessonIds = [...saved, lessonId];
-        }
-        
-        storageService.saveUsers(users);
-        storageService.saveCurrentUser(user);
-        return !isSaved;
+    toggleFollow: async (userId: string, targetId: string): Promise<void> => {
+      await delay(300);
+      const users = storageService.getUsers();
+      const currentUser = users.find(u => u.id === userId);
+      const targetUser = users.find(u => u.id === targetId);
+      
+      if (!currentUser || !targetUser) return;
+      
+      const following = currentUser.following || [];
+      if (following.includes(targetId)) {
+        currentUser.following = following.filter(id => id !== targetId);
+        targetUser.followers = (targetUser.followers || []).filter(id => id !== userId);
+      } else {
+        currentUser.following = [...following, targetId];
+        targetUser.followers = [...(targetUser.followers || []), userId];
+      }
+      
+      storageService.saveUsers(users.map(u => {
+        if (u.id === userId) return currentUser;
+        if (u.id === targetId) return targetUser;
+        return u;
+      }));
+      storageService.saveCurrentUser(currentUser);
     },
-    // Networking Methods
-    joinEvent: async (userId: string, eventId: string): Promise<void> => {
-        await delay(300);
-        const events = storageService.getEvents();
-        const updatedEvents = events.map(ev => {
-            if (ev.id === eventId) {
-                const isJoined = ev.isJoined;
-                return { 
-                    ...ev, 
-                    isJoined: !isJoined, 
-                    attendees: isJoined ? ev.attendees - 1 : ev.attendees + 1 
-                };
-            }
-            return ev;
-        });
-        storageService.saveEvents(updatedEvents);
-    },
-    createEvent: async (event: Event): Promise<void> => {
-        await delay(600);
-        const events = storageService.getEvents();
-        storageService.saveEvents([event, ...events]);
-    },
-    updateEvent: async (event: Event): Promise<void> => {
-        await delay(300);
-        const events = storageService.getEvents();
-        storageService.saveEvents(events.map(e => e.id === event.id ? event : e));
-    },
-    createGroup: async (group: Group): Promise<void> => {
-        await delay(600);
-        const groups = storageService.getGroups();
-        storageService.saveGroups([group, ...groups]);
-    },
-    updateGroup: async (group: Group): Promise<void> => {
-        await delay(400);
-        const groups = storageService.getGroups();
-        storageService.saveGroups(groups.map(g => g.id === group.id ? group : g));
-    },
-    deleteGroup: async (groupId: string): Promise<void> => {
-        await delay(400);
-        const groups = storageService.getGroups();
-        storageService.saveGroups(groups.filter(g => g.id !== groupId));
+    toggleSaveLesson: async (userId: string, lessonId: string): Promise<void> => {
+      await delay(300);
+      const users = storageService.getUsers();
+      const user = users.find(u => u.id === userId);
+      if (!user) return;
+      
+      const saved = user.savedLessonIds || [];
+      if (saved.includes(lessonId)) {
+        user.savedLessonIds = saved.filter(id => id !== lessonId);
+      } else {
+        user.savedLessonIds = [...saved, lessonId];
+      }
+      
+      storageService.saveUsers(users.map(u => u.id === userId ? user : u));
+      storageService.saveCurrentUser(user);
     },
     bookTutorSession: async (session: TutorSession): Promise<void> => {
-        await delay(1000);
-        const users = storageService.getUsers();
-        const student = users.find(u => u.id === session.studentId);
-        const tutor = users.find(u => u.id === session.tutorId);
-        
-        if (!student || !tutor) throw new Error("Participant not found");
-        if (student.points < session.price) throw new Error("Insufficient points");
+      await delay(600);
+      const sessions = storageService.getTutorSessions();
+      storageService.saveTutorSessions([session, ...sessions]);
+    },
+    joinEvent: async (userId: string, eventId: string): Promise<void> => {
+      await delay(400);
+      const events = storageService.getEvents();
+      storageService.saveEvents(events.map(e => e.id === eventId ? { ...e, isJoined: !e.isJoined, attendees: e.isJoined ? e.attendees - 1 : e.attendees + 1 } : e));
+    },
+    createEvent: async (event: Event): Promise<void> => {
+      await delay(600);
+      const events = storageService.getEvents();
+      storageService.saveEvents([event, ...events]);
+    },
+    updateEvent: async (event: Event): Promise<void> => {
+      await delay(400);
+      const events = storageService.getEvents();
+      storageService.saveEvents(events.map(e => e.id === event.id ? event : e));
+    },
+    createGroup: async (group: Group): Promise<void> => {
+      await delay(600);
+      const groups = storageService.getGroups();
+      storageService.saveGroups([group, ...groups]);
+    },
+    updateGroup: async (group: Group): Promise<void> => {
+      await delay(400);
+      const groups = storageService.getGroups();
+      storageService.saveGroups(groups.map(g => g.id === group.id ? group : g));
+    },
+    deleteGroup: async (groupId: string): Promise<void> => {
+      await delay(400);
+      const groups = storageService.getGroups();
+      storageService.saveGroups(groups.filter(g => g.id !== groupId));
+    }
+  },
 
-        // Points Transaction
-        student.points -= session.price;
-        tutor.points += Math.round(session.price * 0.9); // 10% platform fee
+  messaging: {
+    sendMessage: async (senderId: string, participantId: string, text: string, groupId?: string): Promise<void> => {
+      await delay(300);
+      const conversations = storageService.getConversations();
+      const users = storageService.getUsers();
+      const user = users.find(u => u.id === senderId);
+      if (!user) return;
 
-        const studentTx: Transaction = {
-            id: `t-book-s-${Date.now()}`,
-            type: 'debit',
-            amount: session.price,
-            description: `Tutoring Session: ${session.subject} with ${tutor.name}`,
-            timestamp: new Date().toLocaleDateString()
+      const newMessage: Message = {
+        id: `m-${Date.now()}`,
+        senderId: user.id,
+        text: text,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        status: 'sent'
+      };
+
+      let convo = conversations.find(c => groupId ? c.groupId === groupId : (c.participantId === participantId && !c.groupId));
+
+      if (convo) {
+        convo.messages.push(newMessage);
+        convo.lastMessage = text;
+        convo.timestamp = 'Just now';
+        storageService.saveConversations(conversations.map(c => c.id === convo!.id ? convo! : c));
+      } else {
+        const newConvo: Conversation = {
+          id: `c-${Date.now()}`,
+          participantId: groupId ? '' : participantId,
+          groupId: groupId,
+          lastMessage: text,
+          timestamp: 'Just now',
+          unreadCount: 0,
+          messages: [newMessage]
         };
-
-        const tutorTx: Transaction = {
-            id: `t-book-t-${Date.now()}`,
-            type: 'credit',
-            amount: Math.round(session.price * 0.9),
-            description: `Tutoring Session: ${session.subject} with ${student.name}`,
-            timestamp: new Date().toLocaleDateString()
-        };
-
-        const sessions = storageService.getTutorSessions();
-        storageService.saveTutorSessions([...sessions, session]);
-        storageService.saveUsers(users);
-        storageService.saveTransactions([studentTx, tutorTx, ...storageService.getTransactions()]);
-        storageService.saveCurrentUser(student.id === storageService.getCurrentUser()?.id ? student : storageService.getCurrentUser());
+        storageService.saveConversations([newConvo, ...conversations]);
+      }
     }
   },
 
   wallet: {
     purchasePoints: async (userId: string, amount: number): Promise<void> => {
-      await delay(800);
+      await delay(1000);
       const users = storageService.getUsers();
-      const currentUser = users.find(u => u.id === userId);
-      if (!currentUser) throw new Error("User not found");
+      const user = users.find(u => u.id === userId);
+      if (!user) return;
       
-      currentUser.points += amount;
+      user.points += amount;
       
       const tx: Transaction = {
         id: `t-buy-${Date.now()}`,
@@ -304,9 +297,9 @@ export const api = {
         timestamp: new Date().toLocaleDateString()
       };
       
-      storageService.saveUsers(users);
-      storageService.saveCurrentUser(currentUser);
       storageService.saveTransactions([tx, ...storageService.getTransactions()]);
+      storageService.saveUsers(users.map(u => u.id === userId ? user : u));
+      storageService.saveCurrentUser(user);
     }
   }
 };

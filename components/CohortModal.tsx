@@ -35,15 +35,19 @@ const CohortModal: React.FC<GroupModalProps> = ({ isOpen, onClose, currentUser, 
 
   if (!isOpen) return null;
 
-  // Logic: Get only connected users (mutual follow) and exclude institutes
-  const connections = allUsers.filter(u => 
-    u.id !== currentUser.id &&
+  // Logic: Show people the user follows or followers, or just search all users if needed.
+  // We'll prioritize people the current user is following.
+  const followingIds = currentUser.following || [];
+  const followerIds = currentUser.followers || [];
+  
+  // Combine following and followers for a broader pool of potential group members
+  const potentialMembers = allUsers.filter(u => 
+    u.id !== currentUser.id && 
     u.role !== 'institute' &&
-    currentUser.following?.includes(u.id) &&
-    currentUser.followers?.includes(u.id)
+    (followingIds.includes(u.id) || followerIds.includes(u.id))
   );
 
-  const displayUsers = connections.filter(u => 
+  const displayUsers = potentialMembers.filter(u => 
     u.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
     u.handle.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -76,13 +80,16 @@ const CohortModal: React.FC<GroupModalProps> = ({ isOpen, onClose, currentUser, 
         return;
     }
 
+    // Ensure the creator is always in the member list
+    const finalMemberIds = Array.from(new Set([currentUser.id, ...selectedMemberIds]));
+
     const group: Group = {
         id: existingGroup?.id || `grp-${Date.now()}`,
         creatorId: currentUser.id,
         name,
         description,
         image: image || undefined,
-        memberIds: selectedMemberIds,
+        memberIds: finalMemberIds,
         createdAt: existingGroup?.createdAt || new Date().toDateString()
     };
 
@@ -213,7 +220,7 @@ const CohortModal: React.FC<GroupModalProps> = ({ isOpen, onClose, currentUser, 
                 <div className="border-t border-slate-100 pt-4">
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-3 gap-2">
                         <div className="flex items-center gap-2">
-                            <span className="text-sm font-bold text-slate-800">Members</span>
+                            <span className="text-sm font-bold text-slate-800">Add Members</span>
                             <span className="bg-primary-100 text-primary-700 text-xs font-bold px-2 py-0.5 rounded-full">
                                 {selectedMemberIds.length}
                             </span>
@@ -222,7 +229,7 @@ const CohortModal: React.FC<GroupModalProps> = ({ isOpen, onClose, currentUser, 
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
                             <input 
                                 type="text" 
-                                placeholder="Search connections..." 
+                                placeholder="Search following or followers..." 
                                 className="w-full pl-9 pr-3 py-1.5 border border-slate-200 rounded-lg text-sm text-slate-900 outline-none focus:border-primary-500 bg-white focus:bg-white transition-colors"
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -262,7 +269,7 @@ const CohortModal: React.FC<GroupModalProps> = ({ isOpen, onClose, currentUser, 
                             <div className="h-full flex flex-col items-center justify-center text-slate-400">
                                 <Users size={32} className="mb-2 opacity-50" />
                                 <p className="text-sm font-medium">No people found</p>
-                                <p className="text-xs">Try searching for a different name</p>
+                                <p className="text-xs">Follow someone to start building groups</p>
                             </div>
                         )}
                     </div>

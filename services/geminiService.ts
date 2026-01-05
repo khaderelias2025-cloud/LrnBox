@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, Modality } from "@google/genai";
+import { GoogleGenAI, Modality, Type } from "@google/genai";
 import { Lesson, QuizContent, QuizType, Box, AssessmentContent, AssessmentQuestion, CrosswordWord } from "../types";
 
 export interface GeneratedLessonData {
@@ -8,7 +8,6 @@ export interface GeneratedLessonData {
   type: 'text' | 'quiz' | 'image' | 'video' | 'audio' | 'html5' | 'scorm' | 'interactive_video' | 'pdf' | 'ppt' | 'assessment';
   quizType?: QuizType;
   quizData?: QuizContent;
-  assessmentData?: AssessmentContent;
 }
 
 // Audio Decoding Helpers
@@ -28,8 +27,6 @@ async function decodeRawPcmToAudioBuffer(
   sampleRate: number = 24000,
   numChannels: number = 1,
 ): Promise<AudioBuffer> {
-  // Use byteLength/2 because Int16 is 2 bytes per sample
-  // Ensure we use the underlying buffer correctly with offsets
   const dataInt16 = new Int16Array(data.buffer, data.byteOffset, data.byteLength / 2);
   const frameCount = dataInt16.length / numChannels;
   const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
@@ -60,28 +57,24 @@ function audioBufferToWavBlob(buffer: AudioBuffer): Blob {
     pos += 4;
   };
 
-  // write WAVE header
-  setUint32(0x46464952);                         // "RIFF"
-  setUint32(length - 8);                         // file length - 8
-  setUint32(0x45564157);                         // "WAVE"
-
-  setUint32(0x20746d66);                         // "fmt " chunk
-  setUint32(16);                                 // length = 16
-  setUint16(1);                                  // PCM (uncompressed)
+  setUint32(0x46464952);
+  setUint32(length - 8);
+  setUint32(0x45564157);
+  setUint32(0x20746d66);
+  setUint32(16);
+  setUint16(1);
   setUint16(numOfChan);
   setUint32(buffer.sampleRate);
-  setUint32(buffer.sampleRate * 2 * numOfChan);  // avg. bytes/sec
-  setUint16(numOfChan * 2);                      // block-align
-  setUint16(16);                                 // 16-bit
+  setUint32(buffer.sampleRate * 2 * numOfChan);
+  setUint16(numOfChan * 2);
+  setUint16(16);
+  setUint32(0x61746164);
+  setUint32(buffer.length * numOfChan * 2);
 
-  setUint32(0x61746164);                         // "data" - chunk
-  setUint32(buffer.length * numOfChan * 2);      // chunk length
-
-  // write interleaved data
   for (let offset = 0; offset < buffer.length; offset++) {
     for (let channel = 0; channel < numOfChan; channel++) {
       let sample = buffer.getChannelData(channel)[offset];
-      sample = Math.max(-1, Math.min(1, sample)); // clamp
+      sample = Math.max(-1, Math.min(1, sample));
       const intSample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
       view.setInt16(pos, intSample, true);
       pos += 2;
@@ -90,6 +83,40 @@ function audioBufferToWavBlob(buffer: AudioBuffer): Blob {
 
   return new Blob([buffer_arr], { type: "audio/wav" });
 }
+
+export const generateVerbatimSpeech = async (text: string, voiceName: string = 'Zephyr'): Promise<string> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash-preview-tts",
+      contents: [{ parts: [{ text: `Read the following text exactly as written, clearly and at a natural pace: "${text}"` }] }],
+      config: {
+        responseModalities: [Modality.AUDIO],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName },
+          },
+        },
+      },
+    });
+
+    const audioPart = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
+    const base64Audio = audioPart?.inlineData?.data;
+    
+    if (!base64Audio) throw new Error("No audio data returned from Gemini");
+
+    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+    const uint8Data = decodeBase64ToUint8(base64Audio);
+    const audioBuffer = await decodeRawPcmToAudioBuffer(uint8Data, audioCtx, 24000, 1);
+    const wavBlob = audioBufferToWavBlob(audioBuffer);
+    
+    return URL.createObjectURL(wavBlob);
+  } catch (error) {
+    console.error("Verbatim speech failed", error);
+    throw error;
+  }
+};
 
 export const generateLessonAudio = async (prompt: string, voiceName: string = 'Kore'): Promise<string> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -111,18 +138,12 @@ export const generateLessonAudio = async (prompt: string, voiceName: string = 'K
     const audioPart = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
     const base64Audio = audioPart?.inlineData?.data;
     
-    if (!base64Audio) {
-      console.error("Gemini TTS Error: Response did not contain inline audio data.", response);
-      throw new Error("No audio data returned from Gemini");
-    }
+    if (!base64Audio) throw new Error("No audio data returned from Gemini");
 
-    // Convert raw PCM to usable Blob URL
-    // Sample rate for Gemini TTS is typically 24000Hz
     const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
     const uint8Data = decodeBase64ToUint8(base64Audio);
     const audioBuffer = await decodeRawPcmToAudioBuffer(uint8Data, audioCtx, 24000, 1);
     const wavBlob = audioBufferToWavBlob(audioBuffer);
-    
     return URL.createObjectURL(wavBlob);
   } catch (error) {
     console.error("Audio Generation failed", error);
@@ -134,67 +155,29 @@ export const convertPdfToHtml = async (pdfBase64: string): Promise<string> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   if (!process.env.API_KEY) {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve(`
-          <div style="font-family: sans-serif; padding: 20px; color: #1e293b; background: white;">
-            <h1 style="color: #0a66c2;">Interactive Study Guide</h1>
-            <p>This is a simulated interactive version of your PDF.</p>
-            <div style="background: #f1f5f9; padding: 15px; border-radius: 8px; margin: 20px 0;">
-              <h3 style="margin-top: 0;">Key Concepts</h3>
-              <ul>
-                <li>Foundational Theory</li>
-                <li>Practical Application</li>
-                <li>Advanced Techniques</li>
-              </ul>
-            </div>
-            <button style="background: #0a66c2; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer;">
-              Explore Content
-            </button>
-          </div>
-        `);
-      }, 2000);
-    });
+    return `
+      <div style="font-family: sans-serif; padding: 20px; color: #1e293b; background: white;">
+        <h1 style="color: #0a66c2;">Interactive Study Guide</h1>
+        <p>This is a simulated interactive version of your PDF.</p>
+      </div>
+    `;
   }
 
   try {
-    const model = 'gemini-3-flash-preview';
     const response = await ai.models.generateContent({
-      model,
+      model: 'gemini-3-flash-preview',
       contents: [
         {
           parts: [
-            {
-              inlineData: {
-                data: pdfBase64,
-                mimeType: 'application/pdf',
-              },
-            },
-            {
-              text: `
-                Convert the provided PDF into a beautiful, high-fidelity interactive HTML5 document for a micro-learning platform. 
-                
-                Requirements:
-                1. Single-file output containing HTML, CSS, and minimal JS.
-                2. Use a clean, modern aesthetic (like Tailwind or modern professional UI).
-                3. Include a "Key Takeaways" sidebar or section.
-                4. Make it responsive and mobile-friendly.
-                5. Use a white background with dark text for accessibility.
-                6. Extract all important diagrams or text structures into clean HTML tables/lists.
-                7. Add a small interactive button or accordion to reveal "Deep Dive" details.
-                
-                Return ONLY the HTML/CSS/JS code, starting with <!DOCTYPE html>.
-              `,
-            },
-          ],
-        },
-      ],
+            { inlineData: { data: pdfBase64, mimeType: 'application/pdf' } },
+            { text: `Convert the provided PDF into a beautiful, high-fidelity interactive HTML5 document. Return ONLY the HTML/CSS/JS code, starting with <!DOCTYPE html>.` }
+          ]
+        }
+      ]
     });
-
     return response.text || "Failed to convert document.";
   } catch (error) {
-    console.error("PDF Conversion failed", error);
-    return "<div style='padding: 20px; color: red;'>Error: Document conversion failed. Please try again.</div>";
+    return "<div style='padding: 20px; color: red;'>Error: Document conversion failed.</div>";
   }
 };
 
@@ -202,46 +185,53 @@ export const convertPptToHtml = async (pptBase64: string): Promise<string> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   if (!process.env.API_KEY) {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve(`
-          <!DOCTYPE html>
-          <html>
-          <head>
-          <style>
-            body { font-family: sans-serif; background: #1e293b; color: white; margin: 0; display: flex; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
-            .player { width: 90%; max-width: 800px; aspect-ratio: 16/9; background: white; color: #333; border-radius: 12px; position: relative; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); display: flex; flex-direction: column; }
-            .slide { flex: 1; padding: 40px; display: flex; flex-direction: column; justify-content: center; text-align: center; }
-            .controls { padding: 20px; border-top: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
-            button { background: #0a66c2; color: white; border: none; padding: 10px 25px; border-radius: 6px; cursor: pointer; font-weight: bold; }
-            button:disabled { opacity: 0.3; }
-            .progress { position: absolute; bottom: 0; left: 0; height: 4px; background: #0a66c2; transition: width 0.3s; }
-          </style>
-          </head>
-          <body>
-            <div class="player">
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+      <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #202124; color: white; margin: 0; display: flex; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
+        .player { width: 100%; height: 100%; display: flex; flex-direction: column; }
+        .slide-area { flex: 1; display: flex; align-items: center; justify-content: center; padding: 20px; overflow: hidden; position: relative; }
+        .slide { width: 100%; aspect-ratio: 16/9; max-height: 100%; background: white; color: #3c4043; border-radius: 2px; box-shadow: 0 1px 3px rgba(0,0,0,0.4); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 40px; box-sizing: border-box; }
+        .toolbar { height: 44px; background: #000; display: flex; align-items: center; padding: 0 16px; color: #eee; font-size: 13px; gap: 20px; user-select: none; }
+        .btn { cursor: pointer; opacity: 0.7; padding: 8px; transition: opacity 0.2s, background 0.2s; display: flex; align-items: center; justify-content: center; }
+        .btn:hover { opacity: 1; background: rgba(255,255,255,0.1); border-radius: 4px; }
+        .counter { font-family: Roboto, Arial, sans-serif; min-width: 50px; text-align: center; font-weight: 500; }
+        .logo { margin-left: auto; display: flex; align-items: center; gap: 8px; opacity: 0.8; font-weight: bold; font-size: 12px; }
+        .logo svg { width: 18px; height: 18px; fill: #f4b400; }
+      </style>
+      </head>
+      <body>
+        <div class="player">
+            <div class="slide-area">
                 <div class="slide">
-                    <h1>Welcome to the Presentation</h1>
-                    <p>This is an AI-reimagined slide player.</p>
+                    <h1 style="margin: 0 0 20px 0; color: #202124; font-size: 2.5rem;">Presentation Preview</h1>
+                    <p style="margin: 0; color: #5f6368; font-size: 1.2rem;">Please provide an API key to enable high-fidelity content extraction.</p>
                 </div>
-                <div class="controls">
-                    <button disabled>Prev</button>
-                    <span>Slide 1 of 1</span>
-                    <button disabled>Next</button>
-                </div>
-                <div class="progress" style="width: 100%"></div>
             </div>
-          </body>
-          </html>
-        `);
-      }, 2000);
-    });
+            <div class="toolbar">
+                <div class="btn">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+                </div>
+                <span class="counter">1 / 1</span>
+                <div class="btn">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+                </div>
+                <div class="logo">
+                  <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-1 14H6v-2h12v2zm0-4H6v-2h12v2zm0-4H6V7h12v2z"/></svg>
+                  <span>Google Slides</span>
+                </div>
+            </div>
+        </div>
+      </body>
+      </html>
+    `;
   }
 
   try {
-    const model = 'gemini-3-flash-preview';
     const response = await ai.models.generateContent({
-      model,
+      model: 'gemini-3-flash-preview',
       contents: [
         {
           parts: [
@@ -253,27 +243,33 @@ export const convertPptToHtml = async (pptBase64: string): Promise<string> => {
             },
             {
               text: `
-                Convert the provided PowerPoint presentation into a functional, high-fidelity interactive HTML5 slide deck player.
-                
-                Requirements:
-                1. Single-file HTML/CSS/JS output.
-                2. Implement a "Slide Player" logic:
-                   - An array of slide content (HTML strings) in JS.
-                   - Functions to Navigate (Next/Prev).
-                   - Keyboard support (Left/Right arrow keys).
-                   - A progress bar indicator.
-                3. UI Design:
-                   - Stage: A dark cinematic container.
-                   - Slide Area: A 16:9 white aspect-ratio card with rounded corners and soft shadows.
-                   - Floating Controls: Minimalist 'Previous', 'Next', and 'Slide Number' counter.
-                4. Content Extraction:
-                   - Faithfully extract all titles, headers, bullet points, and data from the actual PPTX file.
-                   - Convert charts or tables into clean HTML <table> elements.
-                5. Polish:
-                   - Use a clean sans-serif font (Inter or system-default).
-                   - Add simple fade transitions between slides.
-                
-                Return ONLY the raw code starting with <!DOCTYPE html>.
+                Convert the provided PowerPoint presentation into a standalone HTML5 interactive player that looks EXACTLY like a Google Slides web embed.
+
+                UI REQUIREMENTS (MUST MATCH GOOGLE SLIDES):
+                - Background: Dark canvas (#202124).
+                - Slide View: Centered 16:9 white rectangle. Use standard slide layouts.
+                - Bottom Toolbar: Pure black (#000), 44px height.
+                - Toolbar Controls: 
+                    1. Minimalist "Previous" arrow (left-pointing chevron).
+                    2. Slide counter label (e.g., "1 / 12") centered in the controls section.
+                    3. Minimalist "Next" arrow (right-pointing chevron).
+                    4. A right-aligned "Google Slides" branding lookalike with a yellow icon.
+                - Animations: Smooth 0.3s fade-in/out transitions when switching slides.
+
+                CONTENT EXTRACTION REQUIREMENTS:
+                - DO NOT summarize. DO NOT rewrite.
+                - STRICTLY extract all text content from EVERY slide.
+                - Preserve titles, bullet points, headers, and footer text if present.
+                - Use semantic HTML (h1 for titles, ul/li for bullets).
+                - Use a clean, sans-serif font stack (Roboto, Arial, sans-serif).
+
+                JS REQUIREMENTS:
+                - Implement a robust slide management system.
+                - Add Event Listeners for toolbar buttons.
+                - Add Keyboard Event Listeners for Left/Right arrow keys.
+                - Support auto-scaling content if it overflows the slide bounds.
+
+                Return ONLY the raw HTML code starting with <!DOCTYPE html>.
               `,
             },
           ],
@@ -284,7 +280,7 @@ export const convertPptToHtml = async (pptBase64: string): Promise<string> => {
     return response.text || "Failed to convert presentation.";
   } catch (error) {
     console.error("PPT Conversion failed", error);
-    return "<div style='padding: 20px; color: red;'>Error: Presentation conversion failed. Please try again.</div>";
+    return "<div style='padding: 20px; color: red; background: white;'>Error: Could not render presentation. Please check your file.</div>";
   }
 };
 
@@ -292,51 +288,16 @@ export const generateBoxSummary = async (box: Box): Promise<string> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   if (!process.env.API_KEY) {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve(`This is an AI-generated summary for "${box.title}". \n\nIn this box, you will explore ${box.category} through ${box.lessons.length} micro-lessons. Key topics include foundational principles and practical applications of ${box.tags.join(', ')}. Perfect for ${box.difficulty} learners looking to master these skills efficiently.`);
-      }, 1500);
-    });
+    return `This is an AI-generated summary for "${box.title}". \n\nIn this box, you will explore ${box.category} through ${box.lessons.length} micro-lessons.`;
   }
 
   try {
-    const model = 'gemini-3-flash-preview';
-    
-    // Prepare a detailed content map for the AI to synthesize
-    const lessonContext = box.lessons.map((l, index) => {
-      const typeLabel = l.type.toUpperCase();
-      return `${index + 1}. [${typeLabel}] ${l.title}: ${l.content.substring(0, 200)}${l.content.length > 200 ? '...' : ''}`;
-    }).join('\n');
-    
-    const prompt = `
-      You are an expert educational synthesizer. Create a cohesive "Box Executive Summary" for a learning collection titled "${box.title}".
-      
-      Box Overview: ${box.description}
-      Category: ${box.category}
-      Tags: ${box.tags.join(', ')}
-      Target Audience: ${box.ageGroup} (${box.difficulty} level)
-
-      Here are the individual posts/lessons added to this box:
-      ${lessonContext || 'No lessons added yet.'}
-
-      Instructions:
-      1. Synthesis: Don't just list the lessons. Combine the topics into a meaningful narrative of what the user will learn.
-      2. Core Value: Identify the "Single Most Important Takeaway" from this collection.
-      3. Learning Roadmap: Briefly explain the progression from the first post to the last.
-      4. Outcome: What specific skill will the learner walk away with?
-      
-      Format: Professional, academic but accessible. Use bold text for headers. Do not use Markdown '#' headers. Keep it under 250 words.
-    `;
-
-    const response = await ai.models.generateContent({
-      model: model,
-      contents: prompt,
-    });
-
+    const lessonContext = box.lessons.map((l, index) => `${index + 1}. [${l.type.toUpperCase()}] ${l.title}: ${l.content.substring(0, 100)}...`).join('\n');
+    const prompt = `Create a cohesive Executive Summary for: "${box.title}".\n\nLessons:\n${lessonContext}\n\nKeep it under 200 words.`;
+    const response = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: prompt });
     return response.text || "Failed to generate summary.";
   } catch (error) {
-    console.error("Summary generation failed", error);
-    return "The AI was unable to synthesize the box content at this time. Please ensure your posts have descriptive content and try again.";
+    return "AI was unable to synthesize the box content.";
   }
 };
 
@@ -344,70 +305,93 @@ export const generateAssessment = async (topic: string, context: string, questio
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     
     if (!process.env.API_KEY) {
-        const mockQuestions = [];
-        for (let i = 1; i <= questionCount; i++) {
-          mockQuestions.push({ 
-            id: String(i), 
-            type: i % 2 === 0 ? 'true_false' : 'mcq_single', 
-            question: `Simulated Question ${i} about ${topic}?`, 
-            options: i % 2 === 0 ? undefined : ['Option A', 'Option B', 'Option C', 'Option D'], 
-            correctAnswer: i % 2 === 0 ? true : 0,
-            feedback: `Explanation for simulated question ${i}. This covers the core logic of ${topic}.`
-          });
-        }
-        return {
-            questions: mockQuestions as AssessmentQuestion[],
-            passingScore: 70
-        };
+        return { questions: [], passingScore: 70 };
     }
 
     try {
-        const model = 'gemini-3-flash-preview';
-        const prompt = `
-            Create a comprehensive assessment (exam) about "${topic}".
-            Context of the box: "${context}".
-            
-            Requirements:
-            - Exactly ${questionCount} questions.
-            - Mix of types: 'mcq_single', 'mcq_multi', 'true_false', 'short_answer', 'fill_blanks', 'sorting', 'matching', 'coloring', 'crossword'.
-            - For 'crossword', include "crosswordWords" which is an array of {answer, clue, x, y, direction}.
-            - For EACH question, provide a "feedback" field which is a detailed explanation of why the correct answer is correct.
-            - Return JSON format:
-            {
-              "questions": [
-                { 
-                   "id": "1", 
-                   "type": "mcq_single", 
-                   "question": "...", 
-                   "options": ["...", "..."], 
-                   "correctAnswer": 0,
-                   "feedback": "Detailed explanation here..."
-                },
-                { 
-                   "id": "2", 
-                   "type": "crossword", 
-                   "question": "Solve this crossword about the topic", 
-                   "crosswordWords": [
-                      { "answer": "REACT", "clue": "Popular JS UI library", "x": 0, "y": 0, "direction": "across" },
-                      { "answer": "ROUTER", "clue": "Library for navigation in React", "x": 0, "y": 0, "direction": "down" }
-                   ],
-                   "feedback": "Crosswords help reinforce keyword associations."
-                }
-              ],
-              "passingScore": 80
-            }
-        `;
+        const prompt = `Create a ${questionCount} question academic assessment about "${topic}". Provide a mix of question types (mcq_single, mcq_multi, true_false, fill_blanks). 
+        
+        SPECIAL RULE FOR LOCALIZATION: 
+        For every question, you MUST provide "question_en" and "question_ar". 
+        For every option in MCQs, provide "options_en" and "options_ar" arrays of same length.
+        For feedback, provide "feedback_en" and "feedback_ar".
+        For fill_blanks, use the placeholder {{blank}} in both versions.
 
+        CONTEXT: ${context}`;
+        
         const response = await ai.models.generateContent({
-            model: model,
+            model: 'gemini-3-flash-preview',
             contents: prompt,
-            config: { responseMimeType: 'application/json' }
+            config: { 
+                responseMimeType: 'application/json',
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        passingScore: { type: Type.INTEGER, description: 'Percentage needed to pass (e.g. 80)' },
+                        questions: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    id: { type: Type.STRING },
+                                    type: { type: Type.STRING, description: 'One of: mcq_single, mcq_multi, true_false, short_answer, fill_blanks, sorting, matching, coloring' },
+                                    question_en: { type: Type.STRING },
+                                    question_ar: { type: Type.STRING },
+                                    options_en: { type: Type.ARRAY, items: { type: Type.STRING } },
+                                    options_ar: { type: Type.ARRAY, items: { type: Type.STRING } },
+                                    correctAnswer: { type: Type.STRING, description: 'Index for mcq_single, array for multi, or string/array for others.' },
+                                    feedback_en: { type: Type.STRING },
+                                    feedback_ar: { type: Type.STRING }
+                                },
+                                required: ['id', 'type', 'question_en', 'question_ar', 'correctAnswer', 'feedback_en', 'feedback_ar']
+                            }
+                        }
+                    },
+                    required: ['passingScore', 'questions']
+                }
+            }
         });
 
-        const text = response.text || '{}';
-        return JSON.parse(text) as AssessmentContent;
+        const rawData = JSON.parse(response.text || '{}');
+        
+        const processedQuestions = rawData.questions.map((q: any) => {
+            let processedCorrect = q.correctAnswer;
+            
+            if (q.type === 'mcq_single' || q.type === 'sorting') {
+                processedCorrect = parseInt(q.correctAnswer);
+            } else if (q.type === 'mcq_multi' || q.type === 'coloring') {
+                try {
+                    processedCorrect = typeof q.correctAnswer === 'string' ? JSON.parse(q.correctAnswer) : q.correctAnswer;
+                    if (!Array.isArray(processedCorrect)) processedCorrect = [parseInt(q.correctAnswer)];
+                } catch { processedCorrect = [parseInt(q.correctAnswer)]; }
+            } else if (q.type === 'true_false') {
+                processedCorrect = q.correctAnswer === true || q.correctAnswer === 'true' || q.correctAnswer === 'True';
+            } else if (q.type === 'fill_blanks') {
+                try {
+                    processedCorrect = typeof q.correctAnswer === 'string' ? JSON.parse(q.correctAnswer) : q.correctAnswer;
+                    if (!Array.isArray(processedCorrect)) {
+                        processedCorrect = String(q.correctAnswer).split(',').map((s: string) => s.trim());
+                    }
+                } catch {
+                    processedCorrect = String(q.correctAnswer).split(',').map((s: string) => s.trim());
+                }
+            }
+
+            return { 
+              ...q, 
+              question: q.question_en, // Fallback for components that expect 'question'
+              feedback: `${q.feedback_en} | ${q.feedback_ar}`,
+              options: q.options_en,
+              correctAnswer: processedCorrect 
+            };
+        });
+
+        return { 
+            questions: processedQuestions, 
+            passingScore: parseInt(rawData.passingScore) || 80 
+        };
     } catch (error) {
-        console.error("Assessment generation failed", error);
+        console.error("Assessment Generation Error:", error);
         throw error;
     }
 };
@@ -416,140 +400,71 @@ export const generateMicroLesson = async (topic: string, context: string, target
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   if (!process.env.API_KEY) {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        if (targetType === 'quiz') {
-          resolve({
-            title: `Quiz: ${topic}`,
-            content: `Identify the characteristics of ${topic}`,
-            type: 'quiz',
-            quizType: 'mcq_single',
-            quizData: {
-              question: `What is the key characteristic of ${topic}?`,
-              options: ['Fast', 'Slow', 'Red', 'Blue'],
-              correctAnswer: 0
-            }
-          });
-        } else {
-          resolve({
-            title: `Intro to ${topic}`,
-            content: `This is a simulated AI response about ${topic}.`,
-            type: 'text'
-          });
-        }
-      }, 1000);
-    });
+    return { title: topic, content: "Mock AI Content", type: 'text' };
   }
 
   try {
-    const model = 'gemini-3-flash-preview';
-    const typeInstruction = targetType 
-      ? `The type MUST be "${targetType}".` 
-      : `The type can be "text" or "quiz".`;
-
-    const prompt = `
-      Create a "micro-learning" lesson about "${topic}". 
-      Context of the box: "${context}".
-      ${typeInstruction}
-      
-      If type is 'quiz', choose one of these sub-types randomly or based on what fits best:
-      ['mcq_single', 'mcq_multi', 'true_false', 'short_answer', 'fill_blanks', 'sorting', 'matching', 'coloring', 'crossword'].
-      
-      If 'crossword', return crosswordWords as array of {answer, clue, x, y, direction}.
-      
-      Return ONLY a valid JSON object with this structure:
-      {
-        "title": "Title (max 50 chars)",
-        "content": "Short explanation or question (max 300 chars).",
-        "type": "text" OR "quiz",
-        "quizType": "mcq_single", (or others listed above)
-        "quizData": {
-            "question": "The specific question text",
-            "options": ["Opt1", "Opt2"], (Required for mcq/sorting/matching/coloring)
-            "correctAnswer": 0 (for mcq_single) OR [0, 2] (mcq_multi/coloring) OR true (true_false) OR "Answer string" (short_answer) OR ["Ans1", "Ans2"] (fill_blanks/matching) OR [1, 0, 2] (sorting),
-            "crosswordWords": [...] (if crossword)
-        }
-      }
-      
-      For 'fill_blanks', include {{blank}} in the content or question text.
-    `;
-
+    const prompt = `Create a micro-learning lesson about "${topic}". If it is a quiz, use question types like mcq_single or fill_blanks. For fill_blanks, use the placeholder {{blank}}.
+    Return JSON: { "title": "...", "content": "...", "type": "text", "quizType": "...", "quizData": { "question": "...", "correctAnswer": "..." } }`;
     const response = await ai.models.generateContent({
-      model: model,
+      model: 'gemini-3-flash-preview',
       contents: prompt,
-      config: {
-        responseMimeType: 'application/json'
-      }
+      config: { responseMimeType: 'application/json' }
     });
-
-    const text = response.text || '{}';
-    return JSON.parse(text) as GeneratedLessonData;
-
+    return JSON.parse(response.text || '{}') as GeneratedLessonData;
   } catch (error) {
-    console.error("Gemini generation failed", error);
-    throw new Error("Failed to generate content");
+    throw error;
   }
 };
 
 export const generateLessonVideo = async (prompt: string): Promise<string> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  
   try {
     let operation = await ai.models.generateVideos({
       model: 'veo-3.1-fast-generate-preview',
-      prompt: `Educational micro-learning content: ${prompt}. Cinematic quality, professional lighting, clear subjects.`,
-      config: {
-        numberOfVideos: 1,
-        resolution: '720p',
-        aspectRatio: '16:9'
-      }
+      prompt: `Educational content: ${prompt}`,
+      config: { numberOfVideos: 1, resolution: '720p', aspectRatio: '16:9' }
     });
-
     while (!operation.done) {
       await new Promise(resolve => setTimeout(resolve, 10000));
       operation = await ai.operations.getVideosOperation({ operation: operation });
     }
-
     const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
-    if (!downloadLink) throw new Error("Video generation failed - no URI");
-
     const response = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
     const blob = await response.blob();
     return URL.createObjectURL(blob);
   } catch (error) {
-    console.error("Video Generation failed", error);
     throw error;
   }
 };
 
 export const generateLessonImage = async (prompt: string): Promise<string> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash-image',
-      contents: {
-        parts: [
-          {
-            text: `High-quality educational illustration: ${prompt}. Professional, clean, and clear for micro-learning.`,
-          },
-        ],
-      },
-      config: {
-        imageConfig: {
-          aspectRatio: "16:9"
-        },
-      },
+      contents: { parts: [{ text: `Educational illustration: ${prompt}` }] },
+      config: { imageConfig: { aspectRatio: "16:9" } },
     });
-
     for (const part of response.candidates[0].content.parts) {
-      if (part.inlineData) {
-        return `data:image/png;base64,${part.inlineData.data}`;
-      }
+      if (part.inlineData) return `data:image/png;base64,${part.inlineData.data}`;
     }
-    throw new Error("No image data returned from Gemini");
+    throw new Error("No image data");
   } catch (error) {
-    console.error("Image Generation failed", error);
     throw error;
+  }
+};
+
+export const generateImageExplanation = async (prompt: string): Promise<string> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: `You are an expert educator. Provide a short (2-3 sentences), engaging, and educational explanation for an image described as: "${prompt}". Focus on what a student should learn or notice in this visual.`,
+    });
+    return response.text || "";
+  } catch (error) {
+    console.error("Image explanation failed", error);
+    return "";
   }
 };

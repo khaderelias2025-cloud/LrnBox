@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Box } from '../types';
 import { Users, BookOpen, Plus, Lock, Check, Signal, User, Star, Share2, Unlock, X, Globe, Link as LinkIcon, EyeOff } from 'lucide-react';
 
@@ -24,6 +24,8 @@ const BoxCard: React.FC<BoxCardProps> = ({
     isFavorite = false, 
     onToggleFavorite 
 }) => {
+  const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
+
   // Determine actual access level, falling back to legacy isPrivate if needed
   const accessLevel = box.accessLevel || (box.isPrivate ? (box.price && box.price > 0 ? 'premium' : 'invite_only') : 'public');
   const isPaid = accessLevel === 'premium';
@@ -79,6 +81,11 @@ const BoxCard: React.FC<BoxCardProps> = ({
       }
   };
 
+  const handleThumbnailClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setFullscreenImage(box.coverImage);
+  };
+
   return (
     <div 
       className="group flex flex-col bg-white border border-slate-200 rounded-xl overflow-hidden hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer h-full will-change-transform"
@@ -88,7 +95,8 @@ const BoxCard: React.FC<BoxCardProps> = ({
         <img 
           src={box.coverImage} 
           alt={box.title} 
-          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 cursor-zoom-in"
+          onClick={handleThumbnailClick}
         />
         
         {/* Action Buttons (Favorite & Share) */}
@@ -240,6 +248,27 @@ const BoxCard: React.FC<BoxCardProps> = ({
         </div>
       </div>
       
+      {/* Lightbox */}
+      {fullscreenImage && (
+          <div 
+            className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-in fade-in duration-300"
+            onClick={() => setFullscreenImage(null)}
+          >
+              <button 
+                className="absolute top-6 right-6 text-white/70 hover:text-white transition-colors bg-white/10 hover:bg-white/20 p-2 rounded-full"
+                onClick={(e) => { e.stopPropagation(); setFullscreenImage(null); }}
+              >
+                  <X size={32} />
+              </button>
+              <img 
+                src={fullscreenImage} 
+                alt="Fullscreen" 
+                className="max-w-full max-h-full object-contain shadow-2xl rounded-sm animate-in zoom-in-95 duration-300"
+                onClick={(e) => e.stopPropagation()}
+              />
+          </div>
+      )}
+
       {/* Helper style for nested hover effect without extra CSS file */}
       <style>{`
         .group-button:hover .group-button-hover\\:hidden { display: none; }

@@ -121,12 +121,37 @@ const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const feedLessons = useMemo(() => {
-    return subscribedBoxes.flatMap(box => 
+    // Combine boxes the user is subscribed to AND boxes they created
+    const relevantBoxes = allBoxes.filter(box => 
+      user.subscribedBoxIds?.includes(box.id) || box.creatorId === user.id
+    );
+
+    return relevantBoxes.flatMap(box => 
       box.lessons.map(lesson => ({ ...lesson, box }))
     ).sort((a, b) => {
-        return b.id.localeCompare(a.id);
-    }).slice(0, 10);
-  }, [subscribedBoxes]);
+        // Extract timestamp from ID if possible (format: l-user-174XXXXXXX)
+        // or l-user-quiz-XXXXXXX
+        const getTimestamp = (id: string) => {
+            const parts = id.split('-');
+            const lastPart = parts[parts.length - 1];
+            const numeric = parseInt(lastPart);
+            // Check if it's a valid epoch timestamp (length > 10)
+            return (!isNaN(numeric) && lastPart.length >= 10) ? numeric : 0;
+        };
+
+        const tsA = getTimestamp(a.id);
+        const tsB = getTimestamp(b.id);
+
+        // If both are user posts with timestamps, sort by timestamp
+        if (tsA > 0 || tsB > 0) {
+            if (tsA !== tsB) return tsB - tsA;
+        }
+
+        // Fallback to alphanumeric sort for legacy/mock IDs (e.g. l1, l2)
+        // Use numeric: true to handle 'l10' correctly
+        return b.id.localeCompare(a.id, undefined, { numeric: true });
+    }).slice(0, 20);
+  }, [allBoxes, user.id, user.subscribedBoxIds]);
 
   const spotlightUsers = useMemo(() => {
     return [...allUsers]
@@ -139,7 +164,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   const subscribedCategories = new Set(subscribedBoxes.map(b => b.category));
   
   const recommendedBoxes = allBoxes
-    .filter(box => !subscribedBoxIds.includes(box.id))
+    .filter(box => !subscribedBoxIds.includes(box.id) && box.creatorId !== user.id)
     .sort((a, b) => {
         const aMatch = subscribedCategories.has(a.category) ? 1 : 0;
         const bMatch = subscribedCategories.has(b.category) ? 1 : 0;
@@ -410,21 +435,27 @@ const Dashboard: React.FC<DashboardProps> = ({
             </div>
 
             {feedLessons.map((item) => (
-                <LessonCard 
-                    key={item.id} 
-                    lesson={item} 
-                    box={item.box}
-                    onLike={(id) => {}} 
-                    onComplete={onComplete}
-                    onAddComment={onAddComment}
-                    onHashtagClick={onHashtagClick}
-                    friendsWhoCompleted={item.completedByUserIds?.map(id => allUsers.find(u => u.id === id)).filter(Boolean) as User[]}
-                    onShowCompleters={(users) => handleOpenViewers('Completed by', users)}
-                    onShare={() => setSharingLesson(item)}
-                    isSaved={user.savedLessonIds?.includes(item.id)}
-                    onSave={onSaveLesson}
-                    onDelete={item.box.creatorId === user.id ? (lid) => onDeleteLesson?.(item.box.id, lid) : undefined}
-                />
+                <div key={item.id} className="relative group">
+                    {item.box.creatorId === user.id && (
+                        <div className="absolute top-4 right-14 z-10">
+                            <span className="bg-primary-50 text-primary-600 text-[9px] font-bold px-2 py-0.5 rounded border border-primary-100 uppercase tracking-widest shadow-sm">My Post</span>
+                        </div>
+                    )}
+                    <LessonCard 
+                        lesson={item} 
+                        box={item.box}
+                        onLike={(id) => {}} 
+                        onComplete={onComplete}
+                        onAddComment={onAddComment}
+                        onHashtagClick={onHashtagClick}
+                        friendsWhoCompleted={item.completedByUserIds?.map(id => allUsers.find(u => u.id === id)).filter(Boolean) as User[]}
+                        onShowCompleters={(users) => handleOpenViewers('Completed by', users)}
+                        onShare={() => setSharingLesson(item)}
+                        isSaved={user.savedLessonIds?.includes(item.id)}
+                        onSave={onSaveLesson}
+                        onDelete={item.box.creatorId === user.id ? (lid) => onDeleteLesson?.(item.box.id, lid) : undefined}
+                    />
+                </div>
             ))}
             
             {feedLessons.length === 0 && (
@@ -433,7 +464,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                         <Compass size={32} className="text-slate-300" />
                     </div>
                     <h3 className="font-bold text-slate-900">Your feed is empty</h3>
-                    <p className="text-slate-500 text-sm mt-1 mb-4">Subscribe to boxes to see lessons here.</p>
+                    <p className="text-slate-500 text-sm mt-1 mb-4">Subscribe to boxes or create your own to see lessons here.</p>
                     <button onClick={onExplore} className="bg-primary-600 text-white px-6 py-2 rounded-full font-bold text-sm hover:bg-primary-700 transition-colors">
                         Explore Content
                     </button>
