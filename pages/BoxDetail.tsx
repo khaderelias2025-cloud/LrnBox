@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { Box, User, Lesson, Group, Forum, ForumPost, Poll, PollOption, AssessmentQuestion } from '../types';
+import { Box, User, Lesson, Group, Forum, ForumPost, Poll, PollOption } from '../types';
 import LessonCard from '../components/LessonCard';
 import ViewersModal from '../components/ViewersModal';
 import ShareModal from '../components/ShareBoxModal';
@@ -10,8 +10,7 @@ import {
   ArrowLeft, Users, Lock, CheckCircle, Unlock, Info, Award, Plus, EyeOff, 
   Link as LinkIcon, UserPlus, MessageSquare, Send, ChevronRight, MessageCircle, 
   Clock, Search, Filter, X, Vote, Check, TrendingUp, DollarSign, PieChart, Activity, BarChart2,
-  Sparkles, RefreshCw, FileText, Trophy, BrainCircuit, Database, Copy, Check as CheckIcon,
-  UserCheck
+  Sparkles, RefreshCw, FileText, Trophy, BrainCircuit
 } from 'lucide-react';
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
@@ -40,9 +39,6 @@ interface BoxDetailProps {
   onCreatePoll?: (boxId: string, question: string, options: string[]) => void;
   onVotePoll?: (boxId: string, pollId: string, optionId: string) => void;
   onUpdateLesson?: (boxId: string, lessonId: string, updates: Partial<Lesson>) => void;
-  onToggleFollow?: (userId: string) => void;
-  onMessageUser?: (userId: string) => void;
-  onViewProfile?: (userId: string) => void;
 }
 
 const BoxDetail: React.FC<BoxDetailProps> = ({ 
@@ -66,18 +62,12 @@ const BoxDetail: React.FC<BoxDetailProps> = ({
     onAddForumReply,
     onCreatePoll,
     onVotePoll,
-    onUpdateLesson,
-    onToggleFollow,
-    onMessageUser,
-    onViewProfile
+    onUpdateLesson
 }) => {
-  const [activeTab, setActiveTab] = useState<'lessons' | 'summary' | 'forums' | 'polls' | 'insights' | 'bank' | 'participants'>('lessons');
+  const [activeTab, setActiveTab] = useState<'lessons' | 'summary' | 'forums' | 'polls' | 'insights'>('lessons');
   const [selectedForumId, setSelectedForumId] = useState<string | null>(null);
   const [isCreateForumOpen, setIsCreateForumOpen] = useState(false);
   const [isCreatePollOpen, setIsCreatePollOpen] = useState(false);
-  const [questionBankSearch, setQuestionBankSearch] = useState('');
-  const [participantSearch, setParticipantSearch] = useState('');
-  const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
   
   // AI Summary State
   const [boxSummary, setBoxSummary] = useState<string | null>(null);
@@ -90,8 +80,6 @@ const BoxDetail: React.FC<BoxDetailProps> = ({
   const [replyContent, setReplyContent] = useState('');
   const [newPollQuestion, setNewPollQuestion] = useState('');
   const [newPollOptions, setNewPollOptions] = useState<string[]>(['', '']);
-
-  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const handlePostSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -125,43 +113,6 @@ const BoxDetail: React.FC<BoxDetailProps> = ({
     setNewPollOptions(['', '']);
     setIsCreatePollOpen(false);
   };
-
-  // Derive Question Bank
-  const questionBank = useMemo(() => {
-    const bank: AssessmentQuestion[] = [];
-    box.lessons.forEach(lesson => {
-        if (lesson.type === 'quiz' && lesson.quizData) {
-            bank.push({
-                id: `q-ext-${lesson.id}`,
-                type: lesson.quizType || 'mcq_single',
-                question: lesson.quizData.question,
-                options: lesson.quizData.options,
-                correctAnswer: lesson.quizData.correctAnswer,
-                feedback: `Imported from quiz: ${lesson.title}`
-            });
-        } else if (lesson.type === 'assessment' && lesson.assessmentData) {
-            lesson.assessmentData.questions.forEach(q => {
-                bank.push({ ...q, id: `q-ext-${q.id}` });
-            });
-        }
-    });
-    return bank;
-  }, [box.lessons]);
-
-  const filteredBank = questionBank.filter(q => 
-    q.question.toLowerCase().includes(questionBankSearch.toLowerCase()) ||
-    q.type.toLowerCase().includes(questionBankSearch.toLowerCase())
-  );
-
-  // Derive Participants
-  const participants = useMemo(() => {
-    return allUsers.filter(u => u.subscribedBoxIds?.includes(box.id));
-  }, [allUsers, box.id]);
-
-  const filteredParticipants = participants.filter(p => 
-    p.name.toLowerCase().includes(participantSearch.toLowerCase()) ||
-    p.handle.toLowerCase().includes(participantSearch.toLowerCase())
-  );
 
   const [viewersModalState, setViewersModalState] = useState<{
       isOpen: boolean;
@@ -207,12 +158,6 @@ const BoxDetail: React.FC<BoxDetailProps> = ({
     }
   };
 
-  const handleCopyQuestion = (q: AssessmentQuestion) => {
-      navigator.clipboard.writeText(JSON.stringify(q, null, 2));
-      setCopiedId(q.id);
-      setTimeout(() => setCopiedId(null), 2000);
-  };
-
   // --- Insights Data Derivation ---
   const insightsData = useMemo(() => {
     if (!isOwner) return null;
@@ -247,7 +192,7 @@ const BoxDetail: React.FC<BoxDetailProps> = ({
   if (accessLevel === 'private' && !isOwner) {
       return (
           <div className="flex flex-col items-center justify-center min-h-[50vh] p-4 text-center">
-              <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mb-4 text-slate-400 border border-slate-200">
+              <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4 text-slate-400">
                   <EyeOff size={32} />
               </div>
               <h2 className="text-xl font-bold text-slate-900 mb-2">Access Denied</h2>
@@ -341,174 +286,81 @@ const BoxDetail: React.FC<BoxDetailProps> = ({
                     </ResponsiveContainer>
                 </div>
             </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="p-6 border-b border-slate-100"><h3 className="font-bold text-lg text-slate-900">Lesson Performance</h3></div>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                        <thead>
+                            <tr className="bg-slate-50 text-[10px] font-bold uppercase text-slate-400 tracking-widest border-b border-slate-100">
+                                <th className="px-6 py-4">Lesson Title</th>
+                                <th className="px-6 py-4 text-center">Views</th>
+                                <th className="px-6 py-4 text-center">Completions</th>
+                                <th className="px-6 py-4 text-center">Likes</th>
+                                <th className="px-6 py-4 text-center">Avg. Score</th>
+                                <th className="px-6 py-4 text-right">Trend</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                            {lessonMetrics.map(l => (
+                                <tr key={l.id} className="hover:bg-slate-50/50 transition-colors">
+                                    <td className="px-6 py-4 font-bold text-sm text-slate-800">{l.title}</td>
+                                    <td className="px-6 py-4 text-center text-sm text-slate-600 font-medium">{l.views}</td>
+                                    <td className="px-6 py-4 text-center text-sm text-slate-600 font-medium">{l.completions}</td>
+                                    <td className="px-6 py-4 text-center text-sm text-slate-600 font-medium">{l.likes}</td>
+                                    <td className="px-6 py-4 text-center">
+                                        {l.avgScore ? (
+                                            <span className="bg-green-50 text-green-700 px-2 py-0.5 rounded-full text-xs font-bold">{l.avgScore}%</span>
+                                        ) : <span className="text-slate-300">—</span>}
+                                    </td>
+                                    <td className="px-6 py-4 text-right"><TrendingUp size={16} className="ml-auto text-green-500" /></td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+                <div className="flex justify-between items-center mb-6">
+                    <h3 className="font-bold text-lg text-slate-900">Learner Roster</h3>
+                    {activeSubscribers.length > 0 && (
+                        <button 
+                            onClick={() => handleOpenViewers('Box Participants', activeSubscribers)}
+                            className="text-sm font-bold text-primary-600 hover:text-primary-800 flex items-center gap-1 transition-colors"
+                        >
+                            View All {activeSubscribers.length > 6 && `(${activeSubscribers.length})`} <ChevronRight size={16} />
+                        </button>
+                    )}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {activeSubscribers.slice(0, 6).map(sub => (
+                        <div key={sub.id} className="flex items-center justify-between p-3 border border-slate-100 rounded-xl hover:border-primary-200 transition-colors">
+                            <div className="flex items-center gap-3">
+                                <img src={sub.avatar} className="w-10 h-10 rounded-full object-cover" alt={sub.name} />
+                                <div>
+                                    <p className="text-sm font-bold text-slate-800">{sub.name}</p>
+                                    <p className="text-[10px] text-slate-500 font-medium uppercase">{sub.role}</p>
+                                </div>
+                            </div>
+                            <div className="text-right">
+                                <p className="text-xs font-bold text-primary-600">{Math.floor(Math.random() * 100)}% Done</p>
+                                <p className="text-[10px] text-slate-400">Active recently</p>
+                            </div>
+                        </div>
+                    ))}
+                    {activeSubscribers.length === 0 && (
+                        <div className="col-span-full py-12 text-center border-2 border-dashed border-slate-100 rounded-xl">
+                            <Users size={32} className="mx-auto text-slate-300 mb-2" />
+                            <p className="text-slate-500 italic font-medium">No subscribers yet.</p>
+                            <p className="text-xs text-slate-400">Invite people to join your learning box!</p>
+                        </div>
+                    )}
+                </div>
+            </div>
         </div>
     );
   };
-
-  const renderQuestionBank = () => (
-    <div className="space-y-6 animate-in fade-in duration-300">
-        <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-            <div className="flex items-center gap-3">
-                <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
-                    <Database size={20} />
-                </div>
-                <div>
-                    <h3 className="font-bold text-slate-900">Question Bank</h3>
-                    <p className="text-xs text-slate-500">Aggregate of {questionBank.length} questions from this box.</p>
-                </div>
-            </div>
-            <div className="relative flex-1 w-full sm:max-w-xs">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                <input 
-                    type="text" 
-                    placeholder="Search questions..."
-                    className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-primary-500"
-                    value={questionBankSearch}
-                    onChange={e => setQuestionBankSearch(e.target.value)}
-                />
-            </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {filteredBank.length > 0 ? filteredBank.map((q, idx) => (
-                <div key={q.id} className="bg-white border border-slate-200 rounded-xl p-5 hover:border-primary-300 transition-all shadow-sm group">
-                    <div className="flex justify-between items-start mb-3">
-                        <span className="bg-slate-100 text-slate-600 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider">
-                            {q.type.replace('_', ' ')}
-                        </span>
-                        <button 
-                            onClick={() => handleCopyQuestion(q)}
-                            className={`p-1.5 rounded-lg transition-all ${copiedId === q.id ? 'bg-green-50 text-green-600' : 'text-slate-400 hover:bg-slate-100 hover:text-primary-600'}`}
-                            title="Copy Question JSON"
-                        >
-                            {copiedId === q.id ? <CheckIcon size={14} /> : <Copy size={14} />}
-                        </button>
-                    </div>
-                    <h4 className="font-bold text-slate-800 text-sm mb-4 line-clamp-2">{q.question.replace('{{blank}}', '___')}</h4>
-                    
-                    {q.options && (
-                        <div className="space-y-1.5 mb-4">
-                            {q.options.slice(0, 3).map((opt, i) => (
-                                <div key={i} className="flex items-center gap-2 text-xs text-slate-500">
-                                    <div className="w-1 h-1 rounded-full bg-slate-300" />
-                                    <span className="truncate">{opt}</span>
-                                </div>
-                            ))}
-                            {q.options.length > 3 && <div className="text-[10px] text-slate-400 font-medium">+ {q.options.length - 3} more options</div>}
-                        </div>
-                    )}
-
-                    <div className="pt-3 border-t border-slate-100 flex justify-between items-center">
-                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Correct: {String(q.correctAnswer).substring(0, 20)}</span>
-                        {isOwner && (
-                            <button className="text-[10px] font-bold text-primary-600 hover:underline">Re-use Question</button>
-                        )}
-                    </div>
-                </div>
-            )) : (
-                <div className="col-span-full py-20 text-center bg-white rounded-2xl border-2 border-dashed border-slate-100">
-                    <Database size={48} className="mx-auto text-slate-200 mb-3" />
-                    <h3 className="text-lg font-bold text-slate-700">No questions found</h3>
-                    <p className="text-slate-500 text-sm">Create quizzes or assessments to populate your bank.</p>
-                </div>
-            )}
-        </div>
-    </div>
-  );
-
-  const renderParticipants = () => (
-    <div className="space-y-6 animate-in fade-in duration-300">
-        <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-            <div className="flex items-center gap-3">
-                <div className="p-2 bg-primary-50 text-primary-600 rounded-lg">
-                    <Users size={20} />
-                </div>
-                <div>
-                    <h3 className="font-bold text-slate-900">Learners</h3>
-                    <p className="text-xs text-slate-500">{participants.length} members have joined this box.</p>
-                </div>
-            </div>
-            <div className="relative flex-1 w-full sm:max-w-xs">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                <input 
-                    type="text" 
-                    placeholder="Find a learner..."
-                    className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-primary-500"
-                    value={participantSearch}
-                    onChange={e => setParticipantSearch(e.target.value)}
-                />
-            </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredParticipants.length > 0 ? filteredParticipants.map((participant) => {
-                const isMe = participant.id === currentUser.id;
-                const isFollowing = currentUser.following.includes(participant.id);
-                // Mock progress for others, actual for me
-                const progress = isMe ? Math.round((completedLessonsCount / (totalLessons || 1)) * 100) : Math.floor(Math.random() * 60) + 20;
-
-                return (
-                    <div key={participant.id} className="bg-white border border-slate-200 rounded-xl p-5 hover:border-primary-300 transition-all shadow-sm group">
-                        <div className="flex items-center gap-4 mb-4">
-                            <img 
-                                src={participant.avatar} 
-                                alt={participant.name} 
-                                className="w-12 h-12 rounded-full object-cover border-2 border-slate-50 cursor-pointer"
-                                onClick={() => onViewProfile?.(participant.id)}
-                            />
-                            <div className="min-w-0 flex-1">
-                                <h4 className="font-bold text-slate-900 text-sm truncate hover:underline cursor-pointer" onClick={() => onViewProfile?.(participant.id)}>
-                                    {participant.name}
-                                </h4>
-                                <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">{participant.role}</p>
-                            </div>
-                            {!isMe && (
-                                <button 
-                                    onClick={() => onToggleFollow?.(participant.id)}
-                                    className={`p-2 rounded-lg transition-colors ${isFollowing ? 'text-green-600 bg-green-50' : 'text-slate-400 hover:text-primary-600 hover:bg-primary-50'}`}
-                                >
-                                    {isFollowing ? <UserCheck size={18} /> : <UserPlus size={18} />}
-                                </button>
-                            )}
-                        </div>
-
-                        <div className="space-y-1 mb-4">
-                            <div className="flex justify-between items-center text-[10px] font-bold text-slate-400 uppercase">
-                                <span>Progress</span>
-                                <span className="text-slate-900">{progress}%</span>
-                            </div>
-                            <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                                <div className="h-full bg-primary-600 transition-all duration-1000" style={{ width: `${progress}%` }} />
-                            </div>
-                        </div>
-
-                        <div className="flex gap-2 pt-3 border-t border-slate-50">
-                            <button 
-                                onClick={() => onViewProfile?.(participant.id)}
-                                className="flex-1 py-1.5 rounded-lg bg-slate-50 text-slate-600 text-xs font-bold hover:bg-slate-100 transition-colors"
-                            >
-                                Profile
-                            </button>
-                            {!isMe && (
-                                <button 
-                                    onClick={() => onMessageUser?.(participant.id)}
-                                    className="flex-1 py-1.5 rounded-lg bg-primary-600 text-white text-xs font-bold hover:bg-primary-700 transition-colors flex items-center justify-center gap-1.5"
-                                >
-                                    <MessageSquare size={14} /> Message
-                                </button>
-                            )}
-                        </div>
-                    </div>
-                );
-            }) : (
-                <div className="col-span-full py-20 text-center bg-white rounded-2xl border-2 border-dashed border-slate-100">
-                    <Users size={48} className="mx-auto text-slate-200 mb-3" />
-                    <h3 className="text-lg font-bold text-slate-700">No participants match your search</h3>
-                </div>
-            )}
-        </div>
-    </div>
-  );
 
   const renderSummary = () => (
     <div className="animate-in fade-in duration-500">
@@ -575,6 +427,23 @@ const BoxDetail: React.FC<BoxDetailProps> = ({
             </div>
           )}
         </div>
+        
+        <div className="absolute bottom-0 left-0 w-32 h-32 bg-gradient-to-tr from-primary-50/50 to-transparent -ml-16 -mb-16 rounded-full"></div>
+      </div>
+      
+      <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="bg-indigo-50 border border-indigo-100 p-6 rounded-2xl">
+           <h4 className="font-bold text-indigo-900 mb-1 flex items-center gap-2"><Clock size={16} /> Time Investment</h4>
+           <p className="text-sm text-indigo-700">Estimated {box.lessons.length * 5} minutes of focused learning.</p>
+        </div>
+        <div className="bg-emerald-50 border border-emerald-100 p-6 rounded-2xl">
+           <h4 className="font-bold text-emerald-900 mb-1 flex items-center gap-2"><Trophy size={16} /> Skill Level</h4>
+           <p className="text-sm text-emerald-700">{box.difficulty} - suitable for {box.ageGroup}.</p>
+        </div>
+        <div className="bg-amber-50 border border-amber-100 p-6 rounded-2xl">
+           <h4 className="font-bold text-amber-900 mb-1 flex items-center gap-2"><CheckCircle size={16} /> Outcome</h4>
+           <p className="text-sm text-amber-700">Receive a certificate upon completing {box.lessons.length} lessons.</p>
+        </div>
       </div>
     </div>
   );
@@ -632,9 +501,9 @@ const BoxDetail: React.FC<BoxDetailProps> = ({
 
       <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden mb-8 shadow-sm">
         <div className="h-60 w-full relative">
-          <img src={box.coverImage} alt={box.title} className="w-full h-full object-cover cursor-zoom-in" onClick={() => setFullscreenImage(box.coverImage)} />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent pointer-events-none" />
-          <div className="absolute bottom-6 left-8 right-8 text-white flex justify-between items-end pointer-events-none">
+          <img src={box.coverImage} alt={box.title} className="w-full h-full object-cover" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
+          <div className="absolute bottom-6 left-8 right-8 text-white flex justify-between items-end">
              <div className="flex-1 mr-4">
                 <div className="flex items-center gap-2 mb-2">
                     <span className="bg-primary-600 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider">{box.category}</span>
@@ -643,7 +512,7 @@ const BoxDetail: React.FC<BoxDetailProps> = ({
                 <h1 className="text-4xl font-bold">{box.title}</h1>
                 <p className="text-slate-200 text-sm mt-2 opacity-90 line-clamp-2">{box.description}</p>
              </div>
-             <div className="flex flex-col gap-3 shrink-0 pointer-events-auto">
+             <div className="flex flex-col gap-3 shrink-0">
                 {isCourseCompleted && !isContentLocked && box.hasCertificate && (
                     <button onClick={() => setShowCertificate(true)} className="bg-yellow-400 text-yellow-900 hover:bg-yellow-300 px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-xl animate-enter">
                         <Award size={22} /> Get Certificate
@@ -711,18 +580,6 @@ const BoxDetail: React.FC<BoxDetailProps> = ({
                 <Sparkles size={18} /> AI Summary
             </button>
             <button 
-                onClick={() => setActiveTab('bank')}
-                className={`px-6 py-4 text-sm font-bold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'bank' ? 'border-primary-600 text-primary-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
-            >
-                <Database size={18} /> Question Bank
-            </button>
-            <button 
-                onClick={() => setActiveTab('participants')}
-                className={`px-6 py-4 text-sm font-bold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'participants' ? 'border-primary-600 text-primary-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
-            >
-                <Users size={18} /> Learners
-            </button>
-            <button 
                 onClick={() => setActiveTab('forums')}
                 className={`px-6 py-4 text-sm font-bold border-b-2 transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'forums' ? 'border-primary-600 text-primary-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
             >
@@ -788,8 +645,6 @@ const BoxDetail: React.FC<BoxDetailProps> = ({
             )}
 
             {activeTab === 'summary' && renderSummary()}
-            {activeTab === 'bank' && renderQuestionBank()}
-            {activeTab === 'participants' && renderParticipants()}
 
             {activeTab === 'forums' && (
                 <div className="space-y-6">
@@ -897,7 +752,7 @@ const BoxDetail: React.FC<BoxDetailProps> = ({
       {isCreatePollOpen && (
           <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsCreatePollOpen(false)} />
-            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in duration-200">
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in duration-200">
                 <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-white">
                     <h2 className="font-bold text-lg text-slate-900 flex items-center gap-2"><Vote size={20} className="text-primary-600" /> Create Poll</h2>
                     <button onClick={() => setIsCreatePollOpen(false)} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
@@ -923,26 +778,6 @@ const BoxDetail: React.FC<BoxDetailProps> = ({
                     </div>
                 </form>
             </div>
-          </div>
-      )}
-
-      {fullscreenImage && (
-          <div 
-            className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-in fade-in duration-300"
-            onClick={() => setFullscreenImage(null)}
-          >
-              <button 
-                className="absolute top-6 right-6 text-white/70 hover:text-white transition-colors bg-white/10 hover:bg-white/20 p-2 rounded-full"
-                onClick={(e) => { e.stopPropagation(); setFullscreenImage(null); }}
-              >
-                  <X size={32} />
-              </button>
-              <img 
-                src={fullscreenImage} 
-                alt="Fullscreen" 
-                className="max-w-full max-h-full object-contain shadow-2xl rounded-sm animate-in zoom-in-95 duration-300"
-                onClick={(e) => e.stopPropagation()}
-              />
           </div>
       )}
 

@@ -1,5 +1,5 @@
 
-import { Box, User, Transaction, Notification, Conversation, Event, Reminder, Group, TutorSession } from '../types';
+import { Box, User, Transaction, Notification, Conversation, Event, Reminder, Group } from '../types';
 import { 
   MOCK_BOXES, 
   MOCK_USERS, 
@@ -20,8 +20,7 @@ const KEYS = {
   CONVERSATIONS: 'lrnbox_conversations',
   EVENTS: 'lrnbox_events',
   REMINDERS: 'lrnbox_reminders',
-  GROUPS: 'lrnbox_groups',
-  TUTOR_SESSIONS: 'lrnbox_tutor_sessions'
+  GROUPS: 'lrnbox_groups'
 };
 
 const load = <T>(key: string, defaultValue: T): T => {
@@ -43,18 +42,20 @@ const save = <T>(key: string, data: T): void => {
 };
 
 export const storageService = {
+  // Initialization: Ensure data exists, if not seed with Mocks
   initialize: () => {
     if (!localStorage.getItem(KEYS.BOXES)) save(KEYS.BOXES, MOCK_BOXES);
     if (!localStorage.getItem(KEYS.USERS)) save(KEYS.USERS, MOCK_USERS);
+    // Note: Current user session is handled separately in App.tsx logic usually, but we can seed defaults
     if (!localStorage.getItem(KEYS.TRANSACTIONS)) save(KEYS.TRANSACTIONS, MOCK_TRANSACTIONS);
     if (!localStorage.getItem(KEYS.NOTIFICATIONS)) save(KEYS.NOTIFICATIONS, MOCK_NOTIFICATIONS);
     if (!localStorage.getItem(KEYS.CONVERSATIONS)) save(KEYS.CONVERSATIONS, MOCK_CONVERSATIONS);
     if (!localStorage.getItem(KEYS.EVENTS)) save(KEYS.EVENTS, MOCK_EVENTS);
     if (!localStorage.getItem(KEYS.REMINDERS)) save(KEYS.REMINDERS, MOCK_REMINDERS);
     if (!localStorage.getItem(KEYS.GROUPS)) save(KEYS.GROUPS, MOCK_GROUPS);
-    if (!localStorage.getItem(KEYS.TUTOR_SESSIONS)) save(KEYS.TUTOR_SESSIONS, []);
   },
 
+  // Getters
   getBoxes: (): Box[] => load(KEYS.BOXES, MOCK_BOXES),
   getUsers: (): User[] => load(KEYS.USERS, MOCK_USERS),
   getCurrentUser: (): User | null => load(KEYS.CURRENT_USER, null),
@@ -64,8 +65,8 @@ export const storageService = {
   getEvents: (): Event[] => load(KEYS.EVENTS, MOCK_EVENTS),
   getReminders: (): Reminder[] => load(KEYS.REMINDERS, MOCK_REMINDERS),
   getGroups: (): Group[] => load(KEYS.GROUPS, MOCK_GROUPS),
-  getTutorSessions: (): TutorSession[] => load(KEYS.TUTOR_SESSIONS, []),
 
+  // Setters
   saveBoxes: (boxes: Box[]) => save(KEYS.BOXES, boxes),
   saveUsers: (users: User[]) => save(KEYS.USERS, users),
   saveCurrentUser: (user: User | null) => save(KEYS.CURRENT_USER, user),
@@ -75,10 +76,11 @@ export const storageService = {
   saveEvents: (events: Event[]) => save(KEYS.EVENTS, events),
   saveReminders: (reminders: Reminder[]) => save(KEYS.REMINDERS, reminders),
   saveGroups: (groups: Group[]) => save(KEYS.GROUPS, groups),
-  saveTutorSessions: (sessions: TutorSession[]) => save(KEYS.TUTOR_SESSIONS, sessions),
   
+  // Clear (Logout helper)
   clearSession: () => localStorage.removeItem(KEYS.CURRENT_USER),
 
+  // Backup & Restore
   createBackup: (): string => {
     const backup: Record<string, any> = {};
     Object.values(KEYS).forEach(key => {
@@ -97,6 +99,7 @@ export const storageService = {
       });
       return true;
     } catch (e) {
+      console.error("Backup restoration failed", e);
       return false;
     }
   }

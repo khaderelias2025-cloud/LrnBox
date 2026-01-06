@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Box, User, Transaction, Lesson, Group, TutorSession } from '../types';
 import LessonCard from '../components/LessonCard';
 import ViewersModal from '../components/ViewersModal';
@@ -78,16 +78,6 @@ const Dashboard: React.FC<DashboardProps> = ({
   
   const [sharingLesson, setSharingLesson] = useState<Lesson | null>(null);
   const [profileViewRange, setProfileViewRange] = useState<'7d' | '30d'>('7d');
-  const [scrollY, setScrollY] = useState(0);
-
-  // Parallax Scroll Listener
-  useEffect(() => {
-    const handleScroll = () => {
-      setScrollY(window.scrollY);
-    };
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
 
   const profileViewsData = useMemo(() => {
       if (profileViewRange === '7d') {
@@ -120,38 +110,9 @@ const Dashboard: React.FC<DashboardProps> = ({
       });
   };
 
-  const feedLessons = useMemo(() => {
-    // Combine boxes the user is subscribed to AND boxes they created
-    const relevantBoxes = allBoxes.filter(box => 
-      user.subscribedBoxIds?.includes(box.id) || box.creatorId === user.id
-    );
-
-    return relevantBoxes.flatMap(box => 
-      box.lessons.map(lesson => ({ ...lesson, box }))
-    ).sort((a, b) => {
-        // Extract timestamp from ID if possible (format: l-user-174XXXXXXX)
-        // or l-user-quiz-XXXXXXX
-        const getTimestamp = (id: string) => {
-            const parts = id.split('-');
-            const lastPart = parts[parts.length - 1];
-            const numeric = parseInt(lastPart);
-            // Check if it's a valid epoch timestamp (length > 10)
-            return (!isNaN(numeric) && lastPart.length >= 10) ? numeric : 0;
-        };
-
-        const tsA = getTimestamp(a.id);
-        const tsB = getTimestamp(b.id);
-
-        // If both are user posts with timestamps, sort by timestamp
-        if (tsA > 0 || tsB > 0) {
-            if (tsA !== tsB) return tsB - tsA;
-        }
-
-        // Fallback to alphanumeric sort for legacy/mock IDs (e.g. l1, l2)
-        // Use numeric: true to handle 'l10' correctly
-        return b.id.localeCompare(a.id, undefined, { numeric: true });
-    }).slice(0, 20);
-  }, [allBoxes, user.id, user.subscribedBoxIds]);
+  const feedLessons = subscribedBoxes.flatMap(box => 
+    box.lessons.map(lesson => ({ ...lesson, box }))
+  ).slice(0, 10);
 
   const spotlightUsers = useMemo(() => {
     return [...allUsers]
@@ -164,7 +125,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   const subscribedCategories = new Set(subscribedBoxes.map(b => b.category));
   
   const recommendedBoxes = allBoxes
-    .filter(box => !subscribedBoxIds.includes(box.id) && box.creatorId !== user.id)
+    .filter(box => !subscribedBoxIds.includes(box.id))
     .sort((a, b) => {
         const aMatch = subscribedCategories.has(a.category) ? 1 : 0;
         const bMatch = subscribedCategories.has(b.category) ? 1 : 0;
@@ -188,6 +149,7 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   const streak = user.streak || 0;
 
+  // Tutor Earnings Logic
   const tutorEarnings = useMemo(() => {
       if (user.role !== 'tutor') return 0;
       return myTransactions
@@ -248,6 +210,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                 </div>
             </div>
 
+            {/* Tutor Earnings/Sales Widget */}
             {user.role === 'tutor' && (
                 <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden border-l-4 border-l-green-600">
                     <div className="p-3 border-b border-slate-100 bg-green-50 flex items-center justify-between">
@@ -286,6 +249,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                 </div>
             )}
 
+            {/* Upcoming Tutoring Sessions Widget */}
             {tutorSessions.length > 0 && (
                 <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                     <div className="p-3 border-b border-slate-100 flex justify-between items-center bg-indigo-50">
@@ -398,64 +362,39 @@ const Dashboard: React.FC<DashboardProps> = ({
 
         {/* CENTER COLUMN: Feed */}
         <div className="lg:col-span-2 space-y-6">
-            {/* Mobile Enhanced Profile Card with Parallax Banner */}
-            <div className="lg:hidden bg-white rounded-xl border border-slate-200 shadow-sm mb-4 overflow-hidden animate-enter">
-                <div className="h-28 overflow-hidden relative">
-                    <img 
-                      src={user.banner || 'https://picsum.photos/seed/bg_abstract/400/150'} 
-                      className="w-full h-full object-cover will-change-transform"
-                      style={{ transform: `translateY(${scrollY * 0.3}px)` }}
-                      alt="Banner"
-                    />
-                    <div className="absolute inset-0 bg-black/10" />
-                </div>
-                <div className="px-4 pb-4 flex flex-col items-center sm:items-start sm:flex-row sm:gap-4 -mt-10 relative z-10">
-                    <img 
-                      src={user.avatar} 
-                      className="w-20 h-20 rounded-full border-4 border-white object-cover shadow-lg bg-white cursor-pointer" 
-                      alt={user.name} 
-                      onClick={onEditProfile}
-                    />
-                    <div className="flex-1 min-w-0 text-center sm:text-left mt-2 sm:mt-12">
-                        <div className="flex items-center justify-center sm:justify-start gap-2">
-                           <h2 className="font-bold text-slate-900 text-xl truncate">{user.name}</h2>
-                           <button onClick={onEditProfile} className="text-slate-400 hover:text-slate-600 p-1.5 rounded-full hover:bg-slate-50 transition-colors">
-                               <Edit2 size={16} />
-                           </button>
-                        </div>
-                        <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3 text-sm text-slate-500 mt-1">
-                            <span className="font-bold text-primary-600">{user.points} pts</span>
-                            <span className="text-slate-300">•</span>
-                            <span>{user.followers.length} followers</span>
-                            <span className="text-slate-300">•</span>
-                            <span className="capitalize px-2 py-0.5 bg-slate-100 rounded-md text-[10px] font-bold text-slate-600">{user.role}</span>
-                        </div>
+            <div className="lg:hidden bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4 mb-2 animate-enter">
+                <img src={user.avatar} className="w-14 h-14 rounded-full border-2 border-slate-100 object-cover" alt={user.name} />
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                       <h2 className="font-bold text-slate-900 text-lg truncate">{user.name}</h2>
+                       <button onClick={onEditProfile} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-50 transition-colors">
+                           <Edit2 size={16} />
+                       </button>
+                    </div>
+                    <div className="flex items-center gap-3 text-sm text-slate-500 mt-1">
+                        <span className="font-bold text-slate-900">{user.points} pts</span>
+                        <span>•</span>
+                        <span>{user.followers.length} followers</span>
                     </div>
                 </div>
             </div>
 
             {feedLessons.map((item) => (
-                <div key={item.id} className="relative group">
-                    {item.box.creatorId === user.id && (
-                        <div className="absolute top-4 right-14 z-10">
-                            <span className="bg-primary-50 text-primary-600 text-[9px] font-bold px-2 py-0.5 rounded border border-primary-100 uppercase tracking-widest shadow-sm">My Post</span>
-                        </div>
-                    )}
-                    <LessonCard 
-                        lesson={item} 
-                        box={item.box}
-                        onLike={(id) => {}} 
-                        onComplete={onComplete}
-                        onAddComment={onAddComment}
-                        onHashtagClick={onHashtagClick}
-                        friendsWhoCompleted={item.completedByUserIds?.map(id => allUsers.find(u => u.id === id)).filter(Boolean) as User[]}
-                        onShowCompleters={(users) => handleOpenViewers('Completed by', users)}
-                        onShare={() => setSharingLesson(item)}
-                        isSaved={user.savedLessonIds?.includes(item.id)}
-                        onSave={onSaveLesson}
-                        onDelete={item.box.creatorId === user.id ? (lid) => onDeleteLesson?.(item.box.id, lid) : undefined}
-                    />
-                </div>
+                <LessonCard 
+                    key={item.id} 
+                    lesson={item} 
+                    box={item.box}
+                    onLike={(id) => {}} 
+                    onComplete={onComplete}
+                    onAddComment={onAddComment}
+                    onHashtagClick={onHashtagClick}
+                    friendsWhoCompleted={item.completedByUserIds?.map(id => allUsers.find(u => u.id === id)).filter(Boolean) as User[]}
+                    onShowCompleters={(users) => handleOpenViewers('Completed by', users)}
+                    onShare={() => setSharingLesson(item)}
+                    isSaved={user.savedLessonIds?.includes(item.id)}
+                    onSave={onSaveLesson}
+                    onDelete={item.box.creatorId === user.id ? (lid) => onDeleteLesson?.(item.box.id, lid) : undefined}
+                />
             ))}
             
             {feedLessons.length === 0 && (
@@ -464,7 +403,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                         <Compass size={32} className="text-slate-300" />
                     </div>
                     <h3 className="font-bold text-slate-900">Your feed is empty</h3>
-                    <p className="text-slate-500 text-sm mt-1 mb-4">Subscribe to boxes or create your own to see lessons here.</p>
+                    <p className="text-slate-500 text-sm mt-1 mb-4">Subscribe to boxes to see lessons here.</p>
                     <button onClick={onExplore} className="bg-primary-600 text-white px-6 py-2 rounded-full font-bold text-sm hover:bg-primary-700 transition-colors">
                         Explore Content
                     </button>
@@ -474,6 +413,7 @@ const Dashboard: React.FC<DashboardProps> = ({
 
         {/* RIGHT COLUMN */}
         <div className="hidden lg:block space-y-6 animate-enter" style={{animationDelay: '100ms'}}>
+            {/* Weekly Spotlight Widget */}
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden border-t-4 border-t-yellow-400">
                 <div className="p-4 bg-slate-50/50 border-b border-slate-100 flex items-center justify-between">
                     <h3 className="font-bold text-slate-900 flex items-center gap-2 text-sm uppercase tracking-tight">

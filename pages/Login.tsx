@@ -1,10 +1,11 @@
+
 import React, { useState } from 'react';
-import { Lock, Mail, ArrowRight, Loader2 } from 'lucide-react';
+import { Lock, Mail, ArrowRight } from 'lucide-react';
 import { ViewState } from '../types';
 import Logo from '../components/Logo';
 
 interface LoginProps {
-  onLogin: (handle: string) => Promise<void>;
+  onLogin: (handle: string) => void;
   onNavigate: (view: ViewState) => void;
 }
 
@@ -14,7 +15,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigate }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     
@@ -24,22 +25,18 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigate }) => {
     }
 
     setLoading(true);
-    
-    try {
-      // Small artificial delay for realism
-      await new Promise(resolve => setTimeout(resolve, 800));
-
+    // Simulate API delay
+    setTimeout(() => {
+      // Mock validation: In a real app, verify password hash here.
+      // For this mock, we just ensure a password was typed.
       if (password.length < 3) {
-        throw new Error('Invalid credentials');
+        setError('Invalid credentials');
+        setLoading(false);
+        return;
       }
-
-      await onLogin(handle);
-      // Success navigation is handled by parent App state change
-    } catch (err: any) {
-      setError(err.message || 'Login failed. Please try again.');
-    } finally {
+      onLogin(handle);
       setLoading(false);
-    }
+    }, 800);
   };
 
   return (
@@ -128,12 +125,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onNavigate }) => {
               disabled={loading}
               className="w-full bg-primary-600 text-white py-3 rounded-xl font-bold text-lg hover:bg-primary-700 transition-all shadow-lg shadow-primary-600/20 flex items-center justify-center gap-2 disabled:opacity-70 hover:scale-[1.02] active:scale-[0.98]"
             >
-              {loading ? (
-                <>
-                  <Loader2 className="animate-spin" size={20} />
-                  Signing in...
-                </>
-              ) : (
+              {loading ? 'Signing in...' : (
                 <>
                   Sign in <ArrowRight size={20} />
                 </>
